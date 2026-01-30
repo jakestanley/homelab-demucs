@@ -23,11 +23,12 @@ Copy `.env.example` to `.env` and adjust if needed:
 
 - `HOST` (default `0.0.0.0`)
 - `PORT` (default `20033`)
-- `STORAGE_ROOT` (default `storage`)
+- `STORAGE_ROOT` (default `D:\demucs`)
 - `MAX_CONCURRENT_JOBS` (default `1`)
 - `DEMUCS_DEFAULT_MODEL`
 - `DEMUCS_MODELS` (comma-separated list)
 - `DEMUCS_BIN` (path or command for demucs CLI)
+- `DEMUCS_DEVICE` (default `cuda`, e.g. `cuda` or `cpu`)
 - `OUTPUT_FORMAT_VERSION` (artifact signature salt)
 
 ## Run manually

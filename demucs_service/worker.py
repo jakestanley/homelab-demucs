@@ -18,11 +18,13 @@ class WorkerManager:
         job_store: JobStore,
         artifact_store: ArtifactStore,
         demucs_bin: str,
+        demucs_device: str,
         max_concurrent_jobs: int,
     ) -> None:
         self.job_store = job_store
         self.artifact_store = artifact_store
         self.demucs_bin = demucs_bin
+        self.demucs_device = demucs_device
         self.max_concurrent_jobs = max(1, max_concurrent_jobs)
         self._lock = threading.Lock()
         self._paused = False
@@ -170,6 +172,8 @@ class WorkerManager:
             out_dir = temp_dir / "demucs"
             out_dir.mkdir(parents=True, exist_ok=True)
             cmd = [self.demucs_bin, "-n", model, "--out", str(out_dir)]
+            if self.demucs_device:
+                cmd.extend(["--device", self.demucs_device])
             if mode == "2":
                 cmd.extend(["--two-stems", "vocals"])
             cmd.append(str(input_path))

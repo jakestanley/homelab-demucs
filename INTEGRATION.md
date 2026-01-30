@@ -17,6 +17,8 @@ so you can integrate a consuming application quickly.
 - This service invokes the host Demucs CLI. CUDA availability depends on how
   Demucs is installed on the host. The API does not attempt to detect CUDA
   support from the executable.
+- The service defaults to `DEMUCS_DEVICE=cuda`; set it to `cpu` if you need to
+  force CPU execution.
 - Only `.mp3` uploads are accepted.
 - `mode` values:
   - `4` = 4 stems (vocals, drums, bass, other)

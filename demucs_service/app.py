@@ -13,6 +13,27 @@ from .utils import sanitize_filename
 from .worker import WorkerManager
 
 
+def _sniff_mp3(file_storage) -> bool:
+    stream = file_storage.stream
+    try:
+        head = stream.read(4096)
+    except Exception:
+        return False
+    finally:
+        try:
+            stream.seek(0)
+        except Exception:
+            pass
+    if not head:
+        return False
+    if head.startswith(b"ID3"):
+        return True
+    for idx in range(len(head) - 1):
+        if head[idx] == 0xFF and (head[idx + 1] & 0xE0) == 0xE0:
+            return True
+    return False
+
+
 def create_app(settings: Settings) -> Flask:
     demucs_path = _resolve_demucs_bin(settings.demucs_bin)
     if not demucs_path:
@@ -27,6 +48,7 @@ def create_app(settings: Settings) -> Flask:
         job_store=job_store,
         artifact_store=artifact_store,
         demucs_bin=demucs_path,
+        demucs_device=settings.demucs_device,
         max_concurrent_jobs=settings.max_concurrent_jobs,
     )
 
@@ -86,6 +108,8 @@ def create_app(settings: Settings) -> Flask:
             name = file_storage.filename
             if not name.lower().endswith(".mp3"):
                 return jsonify({"error": f"Only mp3 files supported: {name}"}), 400
+            if not _sniff_mp3(file_storage):
+                return jsonify({"error": f"Invalid mp3 data: {name}"}), 400
             input_entries.append(file_storage)
 
         if not input_entries:
