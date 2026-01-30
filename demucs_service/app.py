@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import os
+import shutil
+from pathlib import Path
+
+from flask import Flask, jsonify, request, send_file, send_from_directory
+
+from .config import Settings
+from .job_store import JobStore
+from .storage import ArtifactStore
+from .utils import sanitize_filename
+from .worker import WorkerManager
+
+
+def create_app(settings: Settings) -> Flask:
+    demucs_path = _resolve_demucs_bin(settings.demucs_bin)
+    if not demucs_path:
+        raise RuntimeError(
+            "Demucs CLI not found. Install Demucs on the host or set DEMUCS_BIN to a full path."
+        )
+    app = Flask(__name__, static_folder="static")
+
+    job_store = JobStore(settings.storage_root)
+    artifact_store = ArtifactStore(settings.storage_root, settings.output_format_version)
+    worker = WorkerManager(
+        job_store=job_store,
+        artifact_store=artifact_store,
+        demucs_bin=demucs_path,
+        max_concurrent_jobs=settings.max_concurrent_jobs,
+    )
+
+    @app.get("/")
+    def index() -> object:
+        return send_from_directory(app.static_folder, "index.html")
+
+    @app.get("/api/status")
+    def status() -> object:
+        worker_status = worker.status()
+        return jsonify(
+            {
+                "service": "demucs",
+                "paused": worker_status["paused"],
+                "running_jobs": worker_status["running_jobs"],
+                "max_concurrent_jobs": settings.max_concurrent_jobs,
+            }
+        )
+
+    @app.post("/api/start")
+    def start_worker() -> object:
+        worker.resume()
+        return jsonify({"ok": True, "paused": False})
+
+    @app.post("/api/stop")
+    def stop_worker() -> object:
+        worker.pause()
+        return jsonify({"ok": True, "paused": True})
+
+    @app.get("/api/models")
+    def models() -> object:
+        return jsonify(
+            {
+                "default": settings.demucs_default_model,
+                "models": settings.demucs_models,
+            }
+        )
+
+    @app.post("/api/jobs")
+    def create_job() -> object:
+        mode = request.form.get("mode", "4")
+        model = request.form.get("model", settings.demucs_default_model)
+        job_name = request.form.get("job_name")
+        if mode not in {"4", "2", "both"}:
+            return jsonify({"error": "Invalid mode."}), 400
+        if model not in settings.demucs_models:
+            return jsonify({"error": "Unknown model."}), 400
+
+        files = request.files.getlist("files[]") or request.files.getlist("files")
+        if not files:
+            return jsonify({"error": "No files uploaded."}), 400
+
+        input_entries = []
+        for file_storage in files:
+            if not file_storage.filename:
+                continue
+            name = file_storage.filename
+            if not name.lower().endswith(".mp3"):
+                return jsonify({"error": f"Only mp3 files supported: {name}"}), 400
+            input_entries.append(file_storage)
+
+        if not input_entries:
+            return jsonify({"error": "No valid mp3 files uploaded."}), 400
+
+        job = job_store.create_job(
+            input_payload={"mode": mode, "model": model, "files": []},
+            total_files=len(input_entries),
+            job_name=job_name,
+        )
+
+        input_dir = job_store.job_input_dir(job["id"])
+        stored_entries = []
+        for idx, file_storage in enumerate(input_entries, start=1):
+            safe_name = sanitize_filename(file_storage.filename)
+            stored_name = f"{idx:03d}-{safe_name}"
+            target_path = input_dir / stored_name
+            file_storage.save(target_path)
+            file_hash = artifact_store.compute_file_hash(target_path)
+            stored_entries.append(
+                {
+                    "name": file_storage.filename,
+                    "stored_name": stored_name,
+                    "size_bytes": target_path.stat().st_size,
+                    "sha256": file_hash,
+                }
+            )
+
+        def updater(job_doc: dict) -> dict:
+            job_doc["input"]["files"] = stored_entries
+            return job_doc
+
+        job_store.update_job(job["id"], updater)
+        return jsonify({"id": job["id"]})
+
+    @app.get("/api/jobs")
+    def list_jobs() -> object:
+        status = request.args.get("status")
+        limit = request.args.get("limit")
+        limit_value = int(limit) if limit and limit.isdigit() else None
+        jobs = job_store.list_jobs(status=status, limit=limit_value)
+        return jsonify({"jobs": jobs})
+
+    @app.get("/api/jobs/<job_id>")
+    def get_job(job_id: str) -> object:
+        job = job_store.get_job(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify(job)
+
+    @app.get("/api/jobs/<job_id>/output")
+    def download_output(job_id: str) -> object:
+        job = job_store.get_job(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        output = job.get("output", {})
+        if not output.get("ready"):
+            return jsonify({"error": "Output not ready"}), 400
+        zip_path = job_store.job_output_zip_path(job_id)
+        if not zip_path.exists():
+            return jsonify({"error": "Output missing"}), 404
+        return send_file(zip_path, mimetype="application/zip", as_attachment=True)
+
+    @app.get("/static/<path:path>")
+    def static_files(path: str) -> object:
+        return send_from_directory(app.static_folder, path)
+
+    return app
+
+
+def _resolve_demucs_bin(demucs_bin: str) -> str | None:
+    if not demucs_bin:
+        return None
+    if os.path.isabs(demucs_bin) or demucs_bin.lower().endswith(".exe"):
+        return demucs_bin if Path(demucs_bin).exists() else None
+    resolved = shutil.which(demucs_bin)
+    return resolved or None
