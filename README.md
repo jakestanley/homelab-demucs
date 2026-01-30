@@ -1,11 +1,11 @@
 # homelab-demucs
 
-Windows-first local HTTP service that accepts MP3 separation jobs and runs the Demucs CLI on the same machine.
+Windows-first HTTP service that accepts MP3 separation jobs and runs the Demucs CLI on the same machine.
 
 ## Runtime
 
 - Windows service via NSSM (preferred)
-- Runs locally without Docker
+- Runs on the host without Docker
 - Ingress, DNS, and ports are defined in `homelab-infra/registry.yaml` (service: `demucs`)
 
 ## Requirements
@@ -52,6 +52,8 @@ To uninstall:
 
 ## API
 
+See `INTEGRATION.md` for the full OpenAPI spec and integration notes.
+
 Control plane:
 
 - `GET /api/status`
@@ -69,7 +71,7 @@ Work plane:
 ### curl example
 
 ```bash
-curl -F "mode=4" -F "model=htdemucs" -F "files[]=@track.mp3" http://localhost:20033/api/jobs
+curl -F "mode=4" -F "model=htdemucs" -F "files[]=@track.mp3" https://demucs.stanley.arpa/api/jobs
 ```
 
 ### Output zip layout
