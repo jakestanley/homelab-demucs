@@ -20,6 +20,14 @@ def sanitize_filename(name: str) -> str:
     return cleaned or "file"
 
 
+def canonical_output_dir_name(original_name: str) -> str:
+    name = Path(original_name).name.strip().rstrip(". ")
+    if name.lower().endswith(".mp3"):
+        name = name[:-4]
+    name = name.strip().rstrip(". ")
+    return sanitize_filename(name or "file")
+
+
 def atomic_write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(

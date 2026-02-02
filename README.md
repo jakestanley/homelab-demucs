@@ -76,6 +76,7 @@ curl -F "mode=4" -F "model=htdemucs" -F "files[]=@track.mp3" https://demucs.stan
 ### Output zip layout
 
 ```
+manifest.json
 {job_id}/
   {track_name}/
     4/
@@ -87,6 +88,8 @@ curl -F "mode=4" -F "model=htdemucs" -F "files[]=@track.mp3" https://demucs.stan
       vocals.wav
       no_vocals.wav
 ```
+
+`manifest.json` maps each uploaded input file to its canonicalized output directory and produced stems/modes.
 
 ## Notes
 

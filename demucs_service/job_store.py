@@ -175,6 +175,7 @@ class JobStore:
         content_type: str,
         size_bytes: int,
         signature: str,
+        manifest: dict | None = None,
     ) -> dict:
         def updater(job: dict) -> dict:
             job["output"] = {
@@ -184,6 +185,8 @@ class JobStore:
                 "size_bytes": size_bytes,
                 "signature": signature,
             }
+            if manifest:
+                job["output"]["manifest"] = manifest
             return job
 
         return self.update_job(job_id, updater)

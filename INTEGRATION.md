@@ -21,6 +21,13 @@ so you can integrate a consuming application quickly.
   - `4` = 4 stems (vocals, drums, bass, other)
   - `2` = 2 stems (vocals, no_vocals)
   - `both` = run both modes and include both in the output zip
+- Output naming is canonicalized and stable:
+  - strips `.mp3` suffix
+  - trims trailing spaces/dots
+  - normalizes unsupported characters to `_`
+- Every output zip includes `manifest.json` with input-to-output mapping.
+- `output.manifest.version` is currently `v1`.
+- Backward compatibility: older completed jobs may not include `output.manifest`.
 
 ## OpenAPI 3.0 spec (YAML)
 
@@ -163,7 +170,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /api/jobs/{job_id}/output:
     get:
-      summary: Download job output zip
+      summary: Download job output zip (includes manifest.json)
       parameters:
         - in: path
           name: job_id
@@ -341,6 +348,9 @@ components:
     JobInputFile:
       type: object
       properties:
+        input_index:
+          type: integer
+          nullable: true
         name:
           type: string
         stored_name:
@@ -387,5 +397,59 @@ components:
         signature:
           type: string
           nullable: true
+        manifest:
+          $ref: "#/components/schemas/OutputManifest"
       required: [ready]
+    OutputManifest:
+      type: object
+      properties:
+        version:
+          type: string
+          example: v1
+        job_id:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestFile"
+      required: [version, job_id, files]
+    ManifestFile:
+      type: object
+      properties:
+        input_index:
+          type: integer
+          nullable: true
+        input_stored_name:
+          type: string
+        input_original_name:
+          type: string
+        output_dir_name:
+          type: string
+        output_dir_path:
+          type: string
+        modes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestMode"
+      required:
+        [input_stored_name, input_original_name, output_dir_name, output_dir_path, modes]
+    ManifestMode:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: ["4", "2"]
+        signature:
+          type: string
+        cache_hit:
+          type: boolean
+        stems:
+          type: array
+          items:
+            type: string
+        rate_seconds_per_second:
+          type: number
+          format: float
+          nullable: true
+      required: [mode, signature, cache_hit, stems]
 ```

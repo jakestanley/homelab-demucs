@@ -153,6 +153,7 @@ def create_app(settings: Settings) -> Flask:
             file_hash = artifact_store.compute_file_hash(target_path)
             stored_entries.append(
                 {
+                    "input_index": idx,
                     "name": file_storage.filename,
                     "stored_name": stored_name,
                     "size_bytes": target_path.stat().st_size,
