@@ -13,6 +13,23 @@ from .utils import sanitize_filename
 from .worker import WorkerManager
 
 
+def check_cuda_or_raise() -> dict:
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"CUDA check failed: unable to import torch ({exc})") from exc
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available; refusing to start.")
+
+    return {
+        "cuda_available": True,
+        "cuda_device_count": torch.cuda.device_count(),
+        "cuda_device_name": torch.cuda.get_device_name(0),
+        "torch_cuda_version": getattr(torch.version, "cuda", None),
+    }
+
+
 def _sniff_mp3(file_storage) -> bool:
     stream = file_storage.stream
     try:
@@ -35,6 +52,9 @@ def _sniff_mp3(file_storage) -> bool:
 
 
 def create_app(settings: Settings) -> Flask:
+    if settings.demucs_device.lower() != "cuda":
+        raise RuntimeError("DEMUCS_DEVICE must be 'cuda'; refusing to start.")
+    cuda_info = check_cuda_or_raise()
     demucs_path = _resolve_demucs_bin(settings.demucs_bin)
     if not demucs_path:
         raise RuntimeError(
@@ -66,6 +86,7 @@ def create_app(settings: Settings) -> Flask:
                 "running_jobs": worker_status["running_jobs"],
                 "max_concurrent_jobs": settings.max_concurrent_jobs,
                 "storage_volume": _storage_volume_status(settings.storage_root),
+                "cuda": cuda_info,
             }
         )
 

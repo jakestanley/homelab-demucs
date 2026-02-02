@@ -14,11 +14,8 @@ so you can integrate a consuming application quickly.
 
 ## Notes for integrators
 
-- This service invokes the host Demucs CLI. CUDA availability depends on how
-  Demucs is installed on the host. The API does not attempt to detect CUDA
-  support from the executable.
-- The service defaults to `DEMUCS_DEVICE=cuda`; set it to `cpu` if you need to
-  force CPU execution.
+- This service invokes the host Demucs CLI.
+- `GET /api/status` includes a `cuda` object with runtime CUDA details.
 - Only `.mp3` uploads are accepted.
 - `mode` values:
   - `4` = 4 stems (vocals, drums, bass, other)
@@ -30,7 +27,7 @@ so you can integrate a consuming application quickly.
 ```yaml
 openapi: 3.0.3
 info:
-  title: Demucs Local Service API
+  title: Demucs Service API
   version: 1.0.0
 servers:
   - url: https://demucs.stanley.arpa
@@ -209,7 +206,40 @@ components:
             type: string
         max_concurrent_jobs:
           type: integer
-      required: [service, paused, running_jobs, max_concurrent_jobs]
+        cuda:
+          $ref: "#/components/schemas/CudaStatus"
+        storage_volume:
+          $ref: "#/components/schemas/StorageVolume"
+      required: [service, paused, running_jobs, max_concurrent_jobs, cuda, storage_volume]
+    CudaStatus:
+      type: object
+      properties:
+        cuda_available:
+          type: boolean
+          example: true
+        cuda_device_count:
+          type: integer
+          example: 1
+        cuda_device_name:
+          type: string
+          example: NVIDIA GeForce RTX 4090
+        torch_cuda_version:
+          type: string
+          nullable: true
+          example: "12.1"
+      required: [cuda_available, cuda_device_count, cuda_device_name]
+    StorageVolume:
+      type: object
+      properties:
+        path:
+          type: string
+        total_bytes:
+          type: integer
+        used_bytes:
+          type: integer
+        free_bytes:
+          type: integer
+      required: [path, total_bytes, used_bytes, free_bytes]
     PauseResponse:
       type: object
       properties:

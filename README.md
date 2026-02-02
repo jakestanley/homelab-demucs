@@ -10,12 +10,10 @@ Windows-first HTTP service that accepts MP3 separation jobs and runs the Demucs 
 
 ## Requirements
 
+- CUDA-capable NVIDIA GPU and drivers
+- PyTorch installed with CUDA support (`torch.cuda.is_available()` must be true)
 - Demucs installed and runnable (`demucs` on PATH unless overridden)
 - Python 3.10+ recommended
-
-Recommended:
-
-- A CUDA-enabled Demucs build on a host with an NVIDIA GPU for faster processing
 
 ## Environment
 
@@ -28,7 +26,7 @@ Copy `.env.example` to `.env` and adjust if needed:
 - `DEMUCS_DEFAULT_MODEL`
 - `DEMUCS_MODELS` (comma-separated list)
 - `DEMUCS_BIN` (path or command for demucs CLI)
-- `DEMUCS_DEVICE` (default `cuda`, e.g. `cuda` or `cpu`)
+- `DEMUCS_DEVICE` (must be `cuda`; service fails startup otherwise)
 - `OUTPUT_FORMAT_VERSION` (artifact signature salt)
 
 ## Run manually
@@ -95,3 +93,4 @@ curl -F "mode=4" -F "model=htdemucs" -F "files[]=@track.mp3" https://demucs.stan
 - Job metadata and artifacts are stored under `STORAGE_ROOT` and survive restarts.
 - `scripts/up.ps1` creates the Windows Firewall rule for the configured port when run elevated.
 - The service uses the host Demucs CLI; set `DEMUCS_BIN` to a full path if it is not on PATH.
+- Startup fails fast if PyTorch CUDA is unavailable.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -10,6 +11,9 @@ from pathlib import Path
 from .job_store import JobStore
 from .storage import ArtifactStore
 from .utils import sanitize_filename
+
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerManager:
@@ -105,7 +109,7 @@ class WorkerManager:
                                 }
                             )
                             continue
-                        self._run_demucs(input_path, mode_entry, model, signature)
+                        self._run_demucs(job_id, input_path, mode_entry, model, signature)
                         output_entries.append(
                             {
                                 "file": file_entry["name"],
@@ -167,7 +171,9 @@ class WorkerManager:
             return ["4", "2"]
         return [mode]
 
-    def _run_demucs(self, input_path: Path, mode: str, model: str, signature: str) -> None:
+    def _run_demucs(
+        self, job_id: str, input_path: Path, mode: str, model: str, signature: str
+    ) -> None:
         def builder(temp_dir: Path) -> None:
             out_dir = temp_dir / "demucs"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +183,18 @@ class WorkerManager:
             if mode == "2":
                 cmd.extend(["--two-stems", "vocals"])
             cmd.append(str(input_path))
-            subprocess.run(cmd, check=True)
+            logger.info("job=%s running demucs command: %s", job_id, " ".join(cmd))
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    logger.info("job=%s demucs: %s", job_id, line)
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    logger.warning("job=%s demucs: %s", job_id, line)
+            if result.returncode != 0:
+                tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
+                details = " | ".join(tail) if tail else f"exit code {result.returncode}"
+                raise RuntimeError(f"Demucs failed for {input_path.name}: {details}")
             stems = self.artifact_store.copy_demucs_output(out_dir, temp_dir)
             self.artifact_store.write_meta(
                 temp_dir,
