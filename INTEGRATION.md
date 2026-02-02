@@ -69,6 +69,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PauseResponse"
+  /api/admin/clear-caches:
+    post:
+      summary: Clear all cached artifacts and all jobs
+      responses:
+        "200":
+          description: Caches cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearCachesResponse"
+        "409":
+          description: Jobs are still running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/models:
     get:
       summary: List available models
@@ -255,6 +271,22 @@ components:
         paused:
           type: boolean
       required: [ok, paused]
+    ClearCachesResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        paused:
+          type: boolean
+        cleared:
+          type: object
+          properties:
+            artifacts_root:
+              type: string
+            jobs_root:
+              type: string
+          required: [artifacts_root, jobs_root]
+      required: [ok, paused, cleared]
     ModelsResponse:
       type: object
       properties:

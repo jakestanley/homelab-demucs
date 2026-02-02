@@ -93,6 +93,11 @@
         border: 1px solid var(--accent);
       }
 
+      button.danger {
+        background: #b11f1f;
+        color: #fff;
+      }
+
       .status-pill {
         padding: 0.35rem 0.7rem;
         border-radius: 999px;
@@ -188,6 +193,12 @@
             <button class="secondary" id="stop-btn">Stop</button>
             <button class="ghost" id="refresh-btn">Refresh</button>
           </div>
+          <div class="row" style="margin-top: 0.75rem">
+            <button class="danger" id="clear-caches-btn" style="width: 100%; font-weight: 700">
+              Clear all caches and jobs
+            </button>
+          </div>
+          <div class="muted" id="clear-caches-status"></div>
         </section>
         <section class="card">
           <h2>Submit Job</h2>
@@ -239,6 +250,8 @@
       const submitStatus = document.getElementById("submit-status");
       const jobsList = document.getElementById("jobs-list");
       const jobMonitor = document.getElementById("job-monitor");
+      const clearCachesBtn = document.getElementById("clear-caches-btn");
+      const clearCachesStatus = document.getElementById("clear-caches-status");
       let activeJobId = null;
 
       async function fetchJson(url, options) {
@@ -397,6 +410,27 @@
       document.getElementById("refresh-btn").addEventListener("click", async () => {
         await loadStatus();
         await loadJobs();
+      });
+
+      clearCachesBtn.addEventListener("click", async () => {
+        const confirmed = window.confirm(
+          "This permanently deletes all cached artifacts and all job records. Continue?"
+        );
+        if (!confirmed) return;
+        clearCachesBtn.disabled = true;
+        clearCachesStatus.textContent = "Clearing caches...";
+        try {
+          await fetchJson("/api/admin/clear-caches", { method: "POST" });
+          clearCachesStatus.textContent = "Caches and jobs cleared.";
+          activeJobId = null;
+          jobMonitor.textContent = "Select a job to monitor.";
+          await loadStatus();
+          await loadJobs();
+        } catch (err) {
+          clearCachesStatus.textContent = err.message;
+        } finally {
+          clearCachesBtn.disabled = false;
+        }
       });
 
       async function boot() {

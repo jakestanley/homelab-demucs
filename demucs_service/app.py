@@ -100,6 +100,35 @@ def create_app(settings: Settings) -> Flask:
         worker.pause()
         return jsonify({"ok": True, "paused": True})
 
+    @app.post("/api/admin/clear-caches")
+    def clear_caches() -> object:
+        worker_status = worker.status()
+        if worker_status["running_jobs"]:
+            return (
+                jsonify(
+                    {
+                        "error": "Cannot clear caches while jobs are running.",
+                        "running_jobs": worker_status["running_jobs"],
+                    }
+                ),
+                409,
+            )
+        worker.pause()
+        shutil.rmtree(artifact_store.artifacts_root, ignore_errors=True)
+        shutil.rmtree(job_store.jobs_root, ignore_errors=True)
+        artifact_store.artifacts_root.mkdir(parents=True, exist_ok=True)
+        job_store.jobs_root.mkdir(parents=True, exist_ok=True)
+        return jsonify(
+            {
+                "ok": True,
+                "paused": True,
+                "cleared": {
+                    "artifacts_root": str(artifact_store.artifacts_root),
+                    "jobs_root": str(job_store.jobs_root),
+                },
+            }
+        )
+
     @app.get("/api/models")
     def models() -> object:
         return jsonify(
