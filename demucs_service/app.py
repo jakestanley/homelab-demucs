@@ -65,6 +65,7 @@ def create_app(settings: Settings) -> Flask:
                 "paused": worker_status["paused"],
                 "running_jobs": worker_status["running_jobs"],
                 "max_concurrent_jobs": settings.max_concurrent_jobs,
+                "storage_volume": _storage_volume_status(settings.storage_root),
             }
         )
 
@@ -187,3 +188,20 @@ def _resolve_demucs_bin(demucs_bin: str) -> str | None:
         return demucs_bin if Path(demucs_bin).exists() else None
     resolved = shutil.which(demucs_bin)
     return resolved or None
+
+
+def _storage_volume_status(storage_root: Path) -> dict:
+    resolved_root = storage_root
+    try:
+        resolved_root = storage_root.resolve()
+    except OSError:
+        pass
+    volume_root = Path(resolved_root.anchor) if resolved_root.anchor else resolved_root
+    usage = shutil.disk_usage(volume_root)
+    return {
+        "path": str(volume_root),
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+    }
+
