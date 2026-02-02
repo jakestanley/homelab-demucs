@@ -364,6 +364,10 @@ components:
           type: string
         cache_hit:
           type: boolean
+        rate_seconds_per_second:
+          type: number
+          format: float
+          nullable: true
         error:
           type: string
     JobOutput:

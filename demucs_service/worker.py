@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -14,6 +16,7 @@ from .utils import sanitize_filename
 
 
 logger = logging.getLogger(__name__)
+_RATE_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*seconds/s")
 
 
 class WorkerManager:
@@ -93,12 +96,14 @@ class WorkerManager:
                         )
                         cache_hit = self.artifact_store.artifact_ready(signature)
                         if cache_hit:
+                            cached_metrics = self._artifact_metrics(signature)
                             output_entries.append(
                                 {
                                     "file": file_entry["name"],
                                     "mode": mode_entry,
                                     "signature": signature,
                                     "cache_hit": True,
+                                    **cached_metrics,
                                 }
                             )
                             file_results.append(
@@ -106,16 +111,20 @@ class WorkerManager:
                                     "mode": mode_entry,
                                     "signature": signature,
                                     "cache_hit": True,
+                                    **cached_metrics,
                                 }
                             )
                             continue
-                        self._run_demucs(job_id, input_path, mode_entry, model, signature)
+                        run_metrics = self._run_demucs(
+                            job_id, input_path, mode_entry, model, signature
+                        )
                         output_entries.append(
                             {
                                 "file": file_entry["name"],
                                 "mode": mode_entry,
                                 "signature": signature,
                                 "cache_hit": False,
+                                **run_metrics,
                             }
                         )
                         file_results.append(
@@ -123,6 +132,7 @@ class WorkerManager:
                                 "mode": mode_entry,
                                 "signature": signature,
                                 "cache_hit": False,
+                                **run_metrics,
                             }
                         )
                     self.job_store.update_progress(
@@ -173,7 +183,7 @@ class WorkerManager:
 
     def _run_demucs(
         self, job_id: str, input_path: Path, mode: str, model: str, signature: str
-    ) -> None:
+    ) -> dict:
         def builder(temp_dir: Path) -> None:
             out_dir = temp_dir / "demucs"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -195,19 +205,43 @@ class WorkerManager:
                 tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
                 details = " | ".join(tail) if tail else f"exit code {result.returncode}"
                 raise RuntimeError(f"Demucs failed for {input_path.name}: {details}")
+            rate = self._extract_processing_rate(result.stdout, result.stderr)
             stems = self.artifact_store.copy_demucs_output(out_dir, temp_dir)
+            meta = {
+                "input_name": input_path.name,
+                "mode": mode,
+                "model": model,
+                "signature": signature,
+                "stems": stems,
+            }
+            if rate is not None:
+                meta["rate_seconds_per_second"] = rate
             self.artifact_store.write_meta(
                 temp_dir,
-                {
-                    "input_name": input_path.name,
-                    "mode": mode,
-                    "model": model,
-                    "signature": signature,
-                    "stems": stems,
-                },
+                meta,
             )
 
         self.artifact_store.ensure_artifact(signature, builder)
+        return self._artifact_metrics(signature)
+
+    def _extract_processing_rate(self, stdout: str | None, stderr: str | None) -> float | None:
+        matches = _RATE_RE.findall(f"{stdout or ''}\n{stderr or ''}")
+        if not matches:
+            return None
+        return float(matches[-1])
+
+    def _artifact_metrics(self, signature: str) -> dict:
+        meta_path = self.artifact_store.artifact_dir(signature) / "meta.json"
+        if not meta_path.exists():
+            return {}
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        rate = meta.get("rate_seconds_per_second")
+        if isinstance(rate, (int, float)):
+            return {"rate_seconds_per_second": float(rate)}
+        return {}
 
     def _build_output_zip(self, job_id: str, output_entries: list[dict]) -> Path:
         import zipfile
