@@ -125,7 +125,7 @@
     "/api/jobs": {
       "get": {
         "summary": "List jobs",
-        "description": "Returns jobs ordered by creation time descending; queued jobs include `queue_position` computed in FIFO order.",
+        "description": "Returns jobs ordered by creation time descending. Queued jobs include `queue_position` computed in FIFO order (1 = next to run).",
         "parameters": [
           {
             "in": "query",
@@ -192,12 +192,12 @@
                   },
                   "job_label": {
                     "type": "string",
-                    "description": "Optional display label (not used for identity)"
+                    "description": "Optional display/log label only; never used for identity, dedupe, cache keys, or output paths."
                   },
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "Single MP3 file"
+                    "description": "Single MP3 file. Exactly one file is supported per job."
                   }
                 }
               }
@@ -221,6 +221,22 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "multi_file_not_supported": {
+                    "summary": "More than one file uploaded",
+                    "value": {
+                      "error": "invalid_request",
+                      "message": "Exactly one file is supported per job; multi-file uploads are not supported."
+                    }
+                  },
+                  "invalid_mode": {
+                    "summary": "Unsupported mode value",
+                    "value": {
+                      "error": "invalid_mode",
+                      "message": "Invalid mode."
+                    }
+                  }
                 }
               }
             }
@@ -231,11 +247,21 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "unsupported_media_type": {
+                    "summary": "Wrong file type",
+                    "value": {
+                      "error": "unsupported_media_type",
+                      "message": "Only mp3 files supported: track.wav"
+                    }
+                  }
                 }
               }
             }
           }
-        }
+        },
+        "description": "Creates exactly one asynchronous job from exactly one uploaded MP3 file. If zero or multiple files are provided in the multipart payload, the request is rejected and no partial work is started."
       }
     },
     "/api/jobs/{job_id}": {
@@ -298,6 +324,14 @@
                   "format": "binary"
                 }
               }
+            },
+            "headers": {
+              "Content-Disposition": {
+                "description": "Attachment filename for the ZIP artifact.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "409": {
@@ -306,6 +340,15 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "job_not_succeeded": {
+                    "summary": "Job not finished yet",
+                    "value": {
+                      "error": "job_not_succeeded",
+                      "message": "Output not ready"
+                    }
+                  }
                 }
               }
             }
@@ -320,7 +363,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Downloads the output ZIP for a succeeded job. ZIP contains deterministic top-level directories only: `all/` (mode 4 or both) and/or `vocals/` (mode 2 or both)."
       }
     },
     "/api/jobs/{job_id}/result": {
@@ -354,6 +398,15 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "job_not_succeeded": {
+                    "summary": "Job not finished yet",
+                    "value": {
+                      "error": "job_not_succeeded",
+                      "message": "Output not ready"
+                    }
+                  }
                 }
               }
             }
@@ -368,7 +421,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Alias of `/api/jobs/{job_id}/output` with identical behavior and response shape."
       }
     },
     "/openapi.json": {
@@ -590,7 +644,10 @@
         },
         "required": [
           "id"
-        ]
+        ],
+        "example": {
+          "id": "5e3db5f098324f8f85cd2cb7486b0d59"
+        }
       },
       "ErrorResponse": {
         "type": "object",
@@ -615,7 +672,12 @@
         "required": [
           "error",
           "message"
-        ]
+        ],
+        "example": {
+          "error": "invalid_request",
+          "message": "Exactly one file is supported per job; multi-file uploads are not supported.",
+          "request_id": "req-1234abcd"
+        }
       },
       "Job": {
         "type": "object",
@@ -718,7 +780,8 @@
           },
           "job_label": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Display/log metadata only; not part of job identity."
           },
           "file": {
             "$ref": "#/components/schemas/JobInputFile"
@@ -811,7 +874,8 @@
         },
         "required": [
           "ready"
-        ]
+        ],
+        "description": "Metadata for downloadable ZIP output. Artifact layout uses deterministic top-level folders (`all/`, `vocals/`)."
       }
     }
   }

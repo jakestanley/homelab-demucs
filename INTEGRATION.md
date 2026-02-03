@@ -9,23 +9,10 @@ This document describes the Demucs HTTP API for single-file job submission.
 
 ## Contract Notes
 
-- `POST /api/jobs` accepts exactly one uploaded `.mp3` per job.
-- Required form fields: `mode`, `model`.
-- Optional form field: `job_label` (display/log metadata only).
-- If zero or multiple files are submitted, the API returns `400` with:
-  - `Exactly one file is supported per job; multi-file uploads are not supported.`
-- Error payloads use:
-  - `error` (machine-readable snake_case code)
-  - `message` (human-readable text)
-  - optional `details`, `request_id`
-- Job creation returns `202 Accepted`.
-- `job_id` is the only job identity.
-- Output zip contains deterministic top-level directories only:
-  - `all/` for mode `4` (or `both`)
-  - `vocals/` for mode `2` (or `both`)
-- Result download endpoints:
-  - `GET /api/jobs/{job_id}/output`
-  - `GET /api/jobs/{job_id}/result` (alias)
-- Non-ready results return `409 Conflict`.
-- `GET /api/jobs` includes queue-observable fields:
-  - `created_at`, `started_at`, `finished_at`, `progress`, `queue_position`
+- The OpenAPI document is the source of truth for request/response schemas, status codes, examples, and endpoint semantics.
+- The service uses a single-file async contract:
+  - `POST /api/jobs` accepts exactly one `.mp3` and returns `202 Accepted`.
+  - `GET /api/jobs/{job_id}` returns job status/progress.
+  - `GET /api/jobs/{job_id}/output` and `GET /api/jobs/{job_id}/result` return the zip artifact when ready.
+- Error responses follow the shared shape: `error`, `message`, optional `details`, optional `request_id`.
+- Queue visibility is exposed via `GET /api/jobs`, including `queue_position` (FIFO semantics for queued jobs).
