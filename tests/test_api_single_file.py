@@ -150,7 +150,7 @@ class ApiSingleFileTests(unittest.TestCase):
                 content_type="multipart/form-data",
             )
             job_id = created.get_json()["id"]
-            output = client.get(f"/api/jobs/{job_id}/output")
+            output = client.get(f"/api/jobs/{job_id}/result")
             self.assertEqual(output.status_code, 409)
             self.assertEqual(
                 output.get_json(),

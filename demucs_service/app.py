@@ -230,8 +230,8 @@ def create_app(settings: Settings) -> Flask:
             return error_response("job_not_found", "Job not found", 404)
         return jsonify(job)
 
-    @app.get("/api/jobs/<job_id>/output")
-    def download_output(job_id: str) -> object:
+    @app.get("/api/jobs/<job_id>/result")
+    def download_result(job_id: str) -> object:
         job = job_store.get_job(job_id)
         if not job:
             return error_response("job_not_found", "Job not found", 404)
@@ -242,10 +242,6 @@ def create_app(settings: Settings) -> Flask:
         if not zip_path.exists():
             return error_response("output_missing", "Output missing", 404)
         return send_file(zip_path, mimetype="application/zip", as_attachment=True)
-
-    @app.get("/api/jobs/<job_id>/result")
-    def download_result(job_id: str) -> object:
-        return download_output(job_id)
 
     @app.get("/openapi.json")
     def openapi_json() -> object:

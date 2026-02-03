@@ -301,9 +301,9 @@
         }
       }
     },
-    "/api/jobs/{job_id}/output": {
+    "/api/jobs/{job_id}/result": {
       "get": {
-        "summary": "Download job output zip",
+        "summary": "Download job result zip",
         "parameters": [
           {
             "in": "path",
@@ -330,64 +330,6 @@
                 "description": "Attachment filename for the ZIP artifact.",
                 "schema": {
                   "type": "string"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Output not ready",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                },
-                "examples": {
-                  "job_not_succeeded": {
-                    "summary": "Job not finished yet",
-                    "value": {
-                      "error": "job_not_succeeded",
-                      "message": "Output not ready"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Job or output missing",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "description": "Downloads the output ZIP for a succeeded job. ZIP contains deterministic top-level directories only: `all/` (mode 4 or both) and/or `vocals/` (mode 2 or both)."
-      }
-    },
-    "/api/jobs/{job_id}/result": {
-      "get": {
-        "summary": "Download job result zip",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Output zip",
-            "content": {
-              "application/zip": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
                 }
               }
             }
@@ -422,7 +364,7 @@
             }
           }
         },
-        "description": "Alias of `/api/jobs/{job_id}/output` with identical behavior and response shape."
+        "description": "Downloads the output ZIP for a succeeded job. ZIP contains deterministic top-level directories only: `all/` (mode 4 or both) and/or `vocals/` (mode 2 or both)."
       }
     },
     "/openapi.json": {

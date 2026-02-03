@@ -66,8 +66,7 @@ Work plane:
 - `POST /api/jobs` (multipart/form-data, fields: `mode`, `model`, optional `job_label`, exactly one `file`)
 - `GET /api/jobs`
 - `GET /api/jobs/{id}`
-- `GET /api/jobs/{id}/output` (zip)
-- `GET /api/jobs/{id}/result` (zip alias)
+- `GET /api/jobs/{id}/result` (zip)
 
 ### curl example
 

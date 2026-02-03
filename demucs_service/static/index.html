@@ -344,7 +344,7 @@
       function renderJobMonitor(job) {
         const progress = progressPercent(job);
         const download = job.output.ready
-          ? `<a class="download-link" href="/api/jobs/${job.id}/output">Download output</a>`
+          ? `<a class="download-link" href="/api/jobs/${job.id}/result">Download output</a>`
           : "";
         jobMonitor.innerHTML = `
           <div>

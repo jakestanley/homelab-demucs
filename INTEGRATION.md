@@ -13,6 +13,6 @@ This document describes the Demucs HTTP API for single-file job submission.
 - The service uses a single-file async contract:
   - `POST /api/jobs` accepts exactly one `.mp3` and returns `202 Accepted`.
   - `GET /api/jobs/{job_id}` returns job status/progress.
-  - `GET /api/jobs/{job_id}/output` and `GET /api/jobs/{job_id}/result` return the zip artifact when ready.
+  - `GET /api/jobs/{job_id}/result` returns the zip artifact when ready.
 - Error responses follow the shared shape: `error`, `message`, optional `details`, optional `request_id`.
 - Queue visibility is exposed via `GET /api/jobs`, including `queue_position` (FIFO semantics for queued jobs).
