@@ -26,12 +26,14 @@ class WorkerManager:
         demucs_bin: str,
         demucs_device: str,
         max_concurrent_jobs: int,
+        job_timeout_seconds: int = 180,
     ) -> None:
         self.job_store = job_store
         self.artifact_store = artifact_store
         self.demucs_bin = demucs_bin
         self.demucs_device = demucs_device
         self.max_concurrent_jobs = max(1, max_concurrent_jobs)
+        self.job_timeout_seconds = max(1, int(job_timeout_seconds))
         self._lock = threading.Lock()
         self._paused = False
         self._running_jobs: dict[str, threading.Thread] = {}
@@ -71,6 +73,7 @@ class WorkerManager:
 
     def _process_job(self, job_id: str) -> None:
         try:
+            deadline = time.monotonic() + self.job_timeout_seconds
             self.job_store.update_progress(job_id, step="processing", message="Processing inputs")
             job = self.job_store.get_job(job_id)
             if not job:
@@ -82,6 +85,7 @@ class WorkerManager:
                 raise RuntimeError("Job is missing input file metadata.")
             output_entries = []
             had_errors = False
+            error_message: str | None = None
             stored_name = file_entry["stored_name"]
             input_path = self.job_store.job_input_dir(job_id) / stored_name
             file_hash = file_entry["sha256"]
@@ -89,6 +93,11 @@ class WorkerManager:
             mode_results = []
             try:
                 for mode_entry in modes:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            f"Job exceeded timeout of {self.job_timeout_seconds} seconds."
+                        )
                     signature = self.artifact_store.compute_signature(
                         file_hash=file_hash, mode=mode_entry, model=model
                     )
@@ -112,7 +121,14 @@ class WorkerManager:
                             }
                         )
                         continue
-                    run_metrics = self._run_demucs(job_id, input_path, mode_entry, model, signature)
+                    run_metrics = self._run_demucs(
+                        job_id,
+                        input_path,
+                        mode_entry,
+                        model,
+                        signature,
+                        timeout_seconds=remaining,
+                    )
                     output_entries.append(
                         {
                             "mode": mode_entry,
@@ -136,6 +152,7 @@ class WorkerManager:
                 )
             except Exception as exc:
                 had_errors = True
+                error_message = str(exc)
                 mode_results.append({"error": str(exc)})
                 self.job_store.update_progress(
                     job_id,
@@ -156,7 +173,12 @@ class WorkerManager:
                 signature=job_signature,
             )
             if had_errors:
-                self.job_store.set_status(job_id, "failed", message="Completed with errors")
+                self.job_store.set_status(
+                    job_id,
+                    "failed",
+                    message="Completed with errors",
+                    error=error_message,
+                )
             else:
                 self.job_store.set_status(job_id, "succeeded", message="Complete")
         except Exception as exc:
@@ -180,7 +202,14 @@ class WorkerManager:
         return [mode]
 
     def _run_demucs(
-        self, job_id: str, input_path: Path, mode: str, model: str, signature: str
+        self,
+        job_id: str,
+        input_path: Path,
+        mode: str,
+        model: str,
+        signature: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> dict:
         def builder(temp_dir: Path) -> None:
             out_dir = temp_dir / "demucs"
@@ -192,7 +221,22 @@ class WorkerManager:
                 cmd.extend(["--two-stems", "vocals"])
             cmd.append(str(input_path))
             logger.info("job=%s running demucs command: %s", job_id, " ".join(cmd))
-            result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+            try:
+                result = subprocess.run(
+                    cmd,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                timeout_detail = (
+                    f"Job exceeded timeout of {self.job_timeout_seconds} seconds while running Demucs."
+                )
+                tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
+                if tail:
+                    timeout_detail = f"{timeout_detail} {' | '.join(tail)}"
+                raise RuntimeError(timeout_detail) from exc
             if result.stdout:
                 for line in result.stdout.splitlines():
                     logger.info("job=%s demucs: %s", job_id, line)

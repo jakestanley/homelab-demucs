@@ -27,6 +27,7 @@ Copy `.env.example` to `.env` and adjust if needed:
 - `DEMUCS_MODELS` (comma-separated list)
 - `DEMUCS_BIN` (path or command for demucs CLI)
 - `DEMUCS_DEVICE` (must be `cuda`; service fails startup otherwise)
+- `JOB_TIMEOUT_SECONDS` (default `180`; job fails if it exceeds this runtime)
 - `OUTPUT_FORMAT_VERSION` (artifact signature salt)
 
 ## Run manually

@@ -32,8 +32,18 @@ class FakeWorkerManager(WorkerManager):
                 self.finished.append(job_id)
 
     def _run_demucs(
-        self, job_id: str, input_path: Path, mode: str, model: str, signature: str
+        self,
+        job_id: str,
+        input_path: Path,
+        mode: str,
+        model: str,
+        signature: str,
+        *,
+        timeout_seconds: float | None = None,
     ) -> dict:
+        if timeout_seconds is not None and self.run_delay > timeout_seconds:
+            raise RuntimeError("Job exceeded timeout while running Demucs.")
+
         def builder(temp_dir: Path) -> None:
             stems_dir = temp_dir / "stems"
             stems_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +106,10 @@ def _wait_for_terminal(job_store: JobStore, job_ids: list[str], timeout_seconds:
     while remaining and time.time() < deadline:
         done = []
         for job_id in remaining:
-            job = job_store.get_job(job_id)
+            try:
+                job = job_store.get_job(job_id)
+            except PermissionError:
+                continue
             if job and job.get("status") in {"succeeded", "failed"}:
                 done.append(job_id)
         for job_id in done:
@@ -185,6 +198,31 @@ class QueueBehaviorTests(unittest.TestCase):
             self.assertIsNotNone(second_doc)
             self.assertNotEqual(first_doc["input"]["job_label"], second_doc["input"]["job_label"])
             self.assertEqual(first_doc["output"]["signature"], second_doc["output"]["signature"])
+
+    def test_job_fails_when_runtime_exceeds_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            job_store = JobStore(root)
+            artifact_store = ArtifactStore(root, output_format_version="v1")
+            worker = FakeWorkerManager(
+                job_store=job_store,
+                artifact_store=artifact_store,
+                demucs_bin="demucs",
+                demucs_device="cuda",
+                max_concurrent_jobs=1,
+                run_delay=1.2,
+                job_timeout_seconds=1,
+            )
+            worker.resume()
+
+            job = _create_job(job_store, artifact_store, "4", "slow-job")
+            _wait_for_terminal(job_store, [job["id"]], timeout_seconds=5.0)
+
+            doc = job_store.get_job(job["id"])
+            self.assertIsNotNone(doc)
+            assert doc is not None
+            self.assertEqual(doc["status"], "failed")
+            self.assertIn("timeout", (doc.get("error") or "").lower())
 
 
 if __name__ == "__main__":

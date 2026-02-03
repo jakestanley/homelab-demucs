@@ -17,6 +17,7 @@ class Settings:
     demucs_models: list[str]
     demucs_bin: str
     demucs_device: str
+    job_timeout_seconds: int
     output_format_version: str
 
 
@@ -41,6 +42,7 @@ def load_settings() -> Settings:
     )
     demucs_bin = os.getenv("DEMUCS_BIN", "demucs")
     demucs_device = os.getenv("DEMUCS_DEVICE", "cuda")
+    job_timeout_seconds = int(os.getenv("JOB_TIMEOUT_SECONDS", "180"))
     output_format_version = os.getenv("OUTPUT_FORMAT_VERSION", "v1-wav")
 
     return Settings(
@@ -52,5 +54,6 @@ def load_settings() -> Settings:
         demucs_models=demucs_models,
         demucs_bin=demucs_bin,
         demucs_device=demucs_device,
+        job_timeout_seconds=job_timeout_seconds,
         output_format_version=output_format_version,
     )

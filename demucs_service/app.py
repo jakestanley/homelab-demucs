@@ -84,6 +84,7 @@ def create_app(settings: Settings) -> Flask:
         demucs_bin=demucs_path,
         demucs_device=settings.demucs_device,
         max_concurrent_jobs=settings.max_concurrent_jobs,
+        job_timeout_seconds=settings.job_timeout_seconds,
     )
 
     @app.after_request
