@@ -189,8 +189,6 @@
           <div class="muted" id="job-status"></div>
           <div class="muted" id="storage-status"></div>
           <div class="row" style="margin-top: 1rem">
-            <button id="start-btn">Start</button>
-            <button class="secondary" id="stop-btn">Stop</button>
             <button class="ghost" id="refresh-btn">Refresh</button>
           </div>
           <div class="row" style="margin-top: 0.75rem">
@@ -277,11 +275,10 @@
 
       async function loadStatus() {
         const status = await fetchJson("/api/status");
-        const paused = status.paused;
-        statusPill.textContent = paused ? "Paused" : "Running";
-        statusPill.style.background = paused ? "#f7e6d1" : "#e2f3e6";
-        statusPill.style.color = paused ? "#9a5c1c" : "#1f6f3a";
-        workerStatus.textContent = `Worker: ${paused ? "paused" : "running"}`;
+        statusPill.textContent = "Running";
+        statusPill.style.background = "#e2f3e6";
+        statusPill.style.color = "#1f6f3a";
+        workerStatus.textContent = "Worker: running";
         const runningJobs = Array.isArray(status.running_jobs) ? status.running_jobs.length : 0;
         jobStatus.textContent = `Active jobs: ${runningJobs}`;
         const volume = status.storage_volume;
@@ -396,16 +393,6 @@
         } finally {
           submitBtn.disabled = false;
         }
-      });
-
-      document.getElementById("start-btn").addEventListener("click", async () => {
-        await fetchJson("/api/start", { method: "POST" });
-        await loadStatus();
-      });
-
-      document.getElementById("stop-btn").addEventListener("click", async () => {
-        await fetchJson("/api/stop", { method: "POST" });
-        await loadStatus();
       });
 
       document.getElementById("refresh-btn").addEventListener("click", async () => {

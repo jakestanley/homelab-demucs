@@ -58,8 +58,6 @@ Live docs are available at `/docs`, with spec endpoint at `/openapi.json`.
 Control plane:
 
 - `GET /api/status`
-- `POST /api/start`
-- `POST /api/stop`
 - `GET /api/models`
 
 Work plane:

@@ -108,7 +108,6 @@ def create_app(settings: Settings) -> Flask:
         return jsonify(
             {
                 "service": "demucs",
-                "paused": worker_status["paused"],
                 "running_jobs": worker_status["running_jobs"],
                 "max_concurrent_jobs": settings.max_concurrent_jobs,
                 "storage_volume": _storage_volume_status(settings.storage_root),
@@ -116,41 +115,32 @@ def create_app(settings: Settings) -> Flask:
             }
         )
 
-    @app.post("/api/start")
-    def start_worker() -> object:
-        worker.resume()
-        return jsonify({"ok": True, "paused": False})
-
-    @app.post("/api/stop")
-    def stop_worker() -> object:
-        worker.pause()
-        return jsonify({"ok": True, "paused": True})
-
     @app.post("/api/admin/clear-caches")
     def clear_caches() -> object:
-        worker_status = worker.status()
-        if worker_status["running_jobs"]:
+        running_jobs = worker.begin_maintenance()
+        if running_jobs:
             return error_response(
                 "conflict",
                 "Cannot clear caches while jobs are running.",
                 409,
-                details={"running_jobs": worker_status["running_jobs"]},
+                details={"running_jobs": running_jobs},
             )
-        worker.pause()
-        shutil.rmtree(artifact_store.artifacts_root, ignore_errors=True)
-        shutil.rmtree(job_store.jobs_root, ignore_errors=True)
-        artifact_store.artifacts_root.mkdir(parents=True, exist_ok=True)
-        job_store.jobs_root.mkdir(parents=True, exist_ok=True)
-        return jsonify(
-            {
-                "ok": True,
-                "paused": True,
-                "cleared": {
-                    "artifacts_root": str(artifact_store.artifacts_root),
-                    "jobs_root": str(job_store.jobs_root),
-                },
-            }
-        )
+        try:
+            shutil.rmtree(artifact_store.artifacts_root, ignore_errors=True)
+            shutil.rmtree(job_store.jobs_root, ignore_errors=True)
+            artifact_store.artifacts_root.mkdir(parents=True, exist_ok=True)
+            job_store.jobs_root.mkdir(parents=True, exist_ok=True)
+            return jsonify(
+                {
+                    "ok": True,
+                    "cleared": {
+                        "artifacts_root": str(artifact_store.artifacts_root),
+                        "jobs_root": str(job_store.jobs_root),
+                    },
+                }
+            )
+        finally:
+            worker.end_maintenance()
 
     @app.get("/api/models")
     def models() -> object:

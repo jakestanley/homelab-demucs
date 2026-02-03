@@ -44,40 +44,6 @@
         }
       }
     },
-    "/api/start": {
-      "post": {
-        "summary": "Resume job processing",
-        "responses": {
-          "200": {
-            "description": "Worker resumed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PauseResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/stop": {
-      "post": {
-        "summary": "Pause job processing",
-        "responses": {
-          "200": {
-            "description": "Worker paused",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PauseResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/admin/clear-caches": {
       "post": {
         "summary": "Clear all cached artifacts and all jobs",
@@ -422,9 +388,6 @@
             "type": "string",
             "example": "demucs"
           },
-          "paused": {
-            "type": "boolean"
-          },
           "running_jobs": {
             "type": "array",
             "items": {
@@ -443,7 +406,6 @@
         },
         "required": [
           "service",
-          "paused",
           "running_jobs",
           "max_concurrent_jobs",
           "cuda",
@@ -499,28 +461,10 @@
           "free_bytes"
         ]
       },
-      "PauseResponse": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "paused": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ok",
-          "paused"
-        ]
-      },
       "ClearCachesResponse": {
         "type": "object",
         "properties": {
           "ok": {
-            "type": "boolean"
-          },
-          "paused": {
             "type": "boolean"
           },
           "cleared": {
@@ -541,7 +485,6 @@
         },
         "required": [
           "ok",
-          "paused",
           "cleared"
         ]
       },

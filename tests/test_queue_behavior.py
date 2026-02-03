@@ -133,14 +133,15 @@ class QueueBehaviorTests(unittest.TestCase):
                 demucs_device="cuda",
                 max_concurrent_jobs=1,
                 run_delay=0.02,
+                run_loop_enabled=False,
             )
-            worker.resume()
 
             jobs = []
             for idx in range(6):
                 jobs.append(_create_job(job_store, artifact_store, "4", f"label-{idx}"))
                 time.sleep(0.002)
 
+            worker.start()
             ids = [job["id"] for job in jobs]
             _wait_for_terminal(job_store, ids)
             self.assertEqual(worker.started[: len(ids)], ids)
@@ -157,10 +158,11 @@ class QueueBehaviorTests(unittest.TestCase):
                 demucs_device="cuda",
                 max_concurrent_jobs=3,
                 run_delay=0.06,
+                run_loop_enabled=False,
             )
-            worker.resume()
 
             jobs = [_create_job(job_store, artifact_store, "both", f"job-{idx}") for idx in range(20)]
+            worker.start()
             ids = [job["id"] for job in jobs]
             _wait_for_terminal(job_store, ids, timeout_seconds=20.0)
 
@@ -185,11 +187,12 @@ class QueueBehaviorTests(unittest.TestCase):
                 demucs_device="cuda",
                 max_concurrent_jobs=1,
                 run_delay=0.01,
+                run_loop_enabled=False,
             )
-            worker.resume()
 
             first = _create_job(job_store, artifact_store, "4", "alpha-label", input_key="shared")
             second = _create_job(job_store, artifact_store, "4", "beta-label", input_key="shared")
+            worker.start()
             _wait_for_terminal(job_store, [first["id"], second["id"]])
 
             first_doc = job_store.get_job(first["id"])
@@ -212,10 +215,11 @@ class QueueBehaviorTests(unittest.TestCase):
                 max_concurrent_jobs=1,
                 run_delay=1.2,
                 job_timeout_seconds=1,
+                run_loop_enabled=False,
             )
-            worker.resume()
 
             job = _create_job(job_store, artifact_store, "4", "slow-job")
+            worker.start()
             _wait_for_terminal(job_store, [job["id"]], timeout_seconds=5.0)
 
             doc = job_store.get_job(job["id"])

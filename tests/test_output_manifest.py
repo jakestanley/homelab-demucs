@@ -41,8 +41,8 @@ class ZipLayoutTests(unittest.TestCase):
                 demucs_bin="demucs",
                 demucs_device="cuda",
                 max_concurrent_jobs=1,
+                run_loop_enabled=False,
             )
-            worker.pause()
             job = self._job(job_store, "4")
             self._write_artifact(
                 artifact_store,
@@ -74,8 +74,8 @@ class ZipLayoutTests(unittest.TestCase):
                 demucs_bin="demucs",
                 demucs_device="cuda",
                 max_concurrent_jobs=1,
+                run_loop_enabled=False,
             )
-            worker.pause()
             job = self._job(job_store, "2")
             self._write_artifact(artifact_store, "sig2", ["vocals.wav", "no_vocals.wav"], 51.11)
 
@@ -101,8 +101,8 @@ class ZipLayoutTests(unittest.TestCase):
                 demucs_bin="demucs",
                 demucs_device="cuda",
                 max_concurrent_jobs=1,
+                run_loop_enabled=False,
             )
-            worker.pause()
             job = self._job(job_store, "both")
             self._write_artifact(
                 artifact_store,

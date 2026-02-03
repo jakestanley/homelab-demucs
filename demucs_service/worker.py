@@ -27,6 +27,7 @@ class WorkerManager:
         demucs_device: str,
         max_concurrent_jobs: int,
         job_timeout_seconds: int = 180,
+        run_loop_enabled: bool = True,
     ) -> None:
         self.job_store = job_store
         self.artifact_store = artifact_store
@@ -35,33 +36,43 @@ class WorkerManager:
         self.max_concurrent_jobs = max(1, max_concurrent_jobs)
         self.job_timeout_seconds = max(1, int(job_timeout_seconds))
         self._lock = threading.Lock()
-        self._paused = False
+        self._maintenance = False
         self._running_jobs: dict[str, threading.Thread] = {}
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
+        self._thread: threading.Thread | None = None
+        if run_loop_enabled:
+            self.start()
 
-    def pause(self) -> None:
+    def start(self) -> None:
         with self._lock:
-            self._paused = True
-
-    def resume(self) -> None:
-        with self._lock:
-            self._paused = False
+            if self._thread and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(target=self._run_loop, daemon=True)
+            self._thread.start()
 
     def status(self) -> dict:
         with self._lock:
             return {
-                "paused": self._paused,
                 "running_jobs": list(self._running_jobs.keys()),
             }
+
+    def begin_maintenance(self) -> list[str] | None:
+        with self._lock:
+            if self._running_jobs:
+                return list(self._running_jobs.keys())
+            self._maintenance = True
+            return None
+
+    def end_maintenance(self) -> None:
+        with self._lock:
+            self._maintenance = False
 
     def _run_loop(self) -> None:
         while True:
             time.sleep(0.5)
             with self._lock:
-                paused = self._paused
+                maintenance = self._maintenance
                 running = len(self._running_jobs)
-            if paused or running >= self.max_concurrent_jobs:
+            if maintenance or running >= self.max_concurrent_jobs:
                 continue
             job = self.job_store.claim_next_queued()
             if not job:
