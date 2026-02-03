@@ -2,31 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-
-_INVALID_FILENAME = re.compile(r"[^a-zA-Z0-9._-]+")
-
-
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def sanitize_filename(name: str) -> str:
-    cleaned = _INVALID_FILENAME.sub("_", name.strip())
-    return cleaned or "file"
-
-
-def canonical_output_dir_name(original_name: str) -> str:
-    name = Path(original_name).name.strip().rstrip(". ")
-    if name.lower().endswith(".mp3"):
-        name = name[:-4]
-    name = name.strip().rstrip(". ")
-    return sanitize_filename(name or "file")
-
 
 def atomic_write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,6 @@ from flask import Flask, jsonify, request, send_file, send_from_directory
 from .config import Settings
 from .job_store import JobStore
 from .storage import ArtifactStore
-from .utils import sanitize_filename
 from .worker import WorkerManager
 
 
@@ -62,6 +61,21 @@ def create_app(settings: Settings) -> Flask:
         )
     app = Flask(__name__, static_folder="static")
 
+    def error_response(
+        error: str,
+        message: str,
+        status: int,
+        *,
+        details: dict | list | None = None,
+    ) -> tuple[object, int]:
+        payload: dict = {"error": error, "message": message}
+        if details is not None:
+            payload["details"] = details
+        request_id = request.headers.get("X-Request-Id")
+        if request_id:
+            payload["request_id"] = request_id
+        return jsonify(payload), status
+
     job_store = JobStore(settings.storage_root)
     artifact_store = ArtifactStore(settings.storage_root, settings.output_format_version)
     worker = WorkerManager(
@@ -72,9 +86,20 @@ def create_app(settings: Settings) -> Flask:
         max_concurrent_jobs=settings.max_concurrent_jobs,
     )
 
+    @app.after_request
+    def propagate_request_id(response):
+        request_id = request.headers.get("X-Request-Id")
+        if request_id:
+            response.headers["X-Request-Id"] = request_id
+        return response
+
     @app.get("/")
     def index() -> object:
         return send_from_directory(app.static_folder, "index.html")
+
+    @app.get("/health")
+    def health() -> object:
+        return jsonify({"ok": True})
 
     @app.get("/api/status")
     def status() -> object:
@@ -104,14 +129,11 @@ def create_app(settings: Settings) -> Flask:
     def clear_caches() -> object:
         worker_status = worker.status()
         if worker_status["running_jobs"]:
-            return (
-                jsonify(
-                    {
-                        "error": "Cannot clear caches while jobs are running.",
-                        "running_jobs": worker_status["running_jobs"],
-                    }
-                ),
+            return error_response(
+                "conflict",
+                "Cannot clear caches while jobs are running.",
                 409,
+                details={"running_jobs": worker_status["running_jobs"]},
             )
         worker.pause()
         shutil.rmtree(artifact_store.artifacts_root, ignore_errors=True)
@@ -142,60 +164,56 @@ def create_app(settings: Settings) -> Flask:
     def create_job() -> object:
         mode = request.form.get("mode", "4")
         model = request.form.get("model", settings.demucs_default_model)
-        job_name = request.form.get("job_name")
+        job_label = request.form.get("job_label")
         if mode not in {"4", "2", "both"}:
-            return jsonify({"error": "Invalid mode."}), 400
+            return error_response("invalid_mode", "Invalid mode.", 400)
         if model not in settings.demucs_models:
-            return jsonify({"error": "Unknown model."}), 400
+            return error_response("unknown_model", "Unknown model.", 400)
 
-        files = request.files.getlist("files[]") or request.files.getlist("files")
-        if not files:
-            return jsonify({"error": "No files uploaded."}), 400
-
-        input_entries = []
-        for file_storage in files:
-            if not file_storage.filename:
-                continue
-            name = file_storage.filename
-            if not name.lower().endswith(".mp3"):
-                return jsonify({"error": f"Only mp3 files supported: {name}"}), 400
-            if not _sniff_mp3(file_storage):
-                return jsonify({"error": f"Invalid mp3 data: {name}"}), 400
-            input_entries.append(file_storage)
-
-        if not input_entries:
-            return jsonify({"error": "No valid mp3 files uploaded."}), 400
+        uploaded_files = []
+        for _, values in request.files.lists():
+            uploaded_files.extend(values)
+        input_entries = [entry for entry in uploaded_files if entry and entry.filename]
+        if len(input_entries) != 1:
+            return error_response(
+                "invalid_request",
+                "Exactly one file is supported per job; multi-file uploads are not supported.",
+                400,
+            )
+        file_storage = input_entries[0]
+        name = file_storage.filename
+        if not name.lower().endswith(".mp3"):
+            return error_response(
+                "unsupported_media_type",
+                f"Only mp3 files supported: {name}",
+                415,
+            )
+        if not _sniff_mp3(file_storage):
+            return error_response("invalid_mp3", f"Invalid mp3 data: {name}", 400)
 
         job = job_store.create_job(
-            input_payload={"mode": mode, "model": model, "files": []},
-            total_files=len(input_entries),
-            job_name=job_name,
+            input_payload={"mode": mode, "model": model, "file": {}},
+            job_label=job_label,
         )
 
         input_dir = job_store.job_input_dir(job["id"])
-        stored_entries = []
-        for idx, file_storage in enumerate(input_entries, start=1):
-            safe_name = sanitize_filename(file_storage.filename)
-            stored_name = f"{idx:03d}-{safe_name}"
-            target_path = input_dir / stored_name
-            file_storage.save(target_path)
-            file_hash = artifact_store.compute_file_hash(target_path)
-            stored_entries.append(
-                {
-                    "input_index": idx,
-                    "name": file_storage.filename,
-                    "stored_name": stored_name,
-                    "size_bytes": target_path.stat().st_size,
-                    "sha256": file_hash,
-                }
-            )
+        stored_name = "input.mp3"
+        target_path = input_dir / stored_name
+        file_storage.save(target_path)
+        file_hash = artifact_store.compute_file_hash(target_path)
+        stored_entry = {
+            "original_filename": file_storage.filename,
+            "stored_name": stored_name,
+            "size_bytes": target_path.stat().st_size,
+            "sha256": file_hash,
+        }
 
         def updater(job_doc: dict) -> dict:
-            job_doc["input"]["files"] = stored_entries
+            job_doc["input"]["file"] = stored_entry
             return job_doc
 
         job_store.update_job(job["id"], updater)
-        return jsonify({"id": job["id"]})
+        return jsonify({"id": job["id"]}), 202
 
     @app.get("/api/jobs")
     def list_jobs() -> object:
@@ -209,21 +227,54 @@ def create_app(settings: Settings) -> Flask:
     def get_job(job_id: str) -> object:
         job = job_store.get_job(job_id)
         if not job:
-            return jsonify({"error": "Job not found"}), 404
+            return error_response("job_not_found", "Job not found", 404)
         return jsonify(job)
 
     @app.get("/api/jobs/<job_id>/output")
     def download_output(job_id: str) -> object:
         job = job_store.get_job(job_id)
         if not job:
-            return jsonify({"error": "Job not found"}), 404
+            return error_response("job_not_found", "Job not found", 404)
         output = job.get("output", {})
         if not output.get("ready"):
-            return jsonify({"error": "Output not ready"}), 400
+            return error_response("job_not_succeeded", "Output not ready", 409)
         zip_path = job_store.job_output_zip_path(job_id)
         if not zip_path.exists():
-            return jsonify({"error": "Output missing"}), 404
+            return error_response("output_missing", "Output missing", 404)
         return send_file(zip_path, mimetype="application/zip", as_attachment=True)
+
+    @app.get("/api/jobs/<job_id>/result")
+    def download_result(job_id: str) -> object:
+        return download_output(job_id)
+
+    @app.get("/openapi.json")
+    def openapi_json() -> object:
+        openapi_path = Path(__file__).resolve().parent / "openapi.json"
+        return openapi_path.read_text(encoding="utf-8"), 200, {"Content-Type": "application/json"}
+
+    @app.get("/docs")
+    def docs() -> object:
+        html = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demucs API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: "#swagger-ui",
+      });
+    </script>
+  </body>
+</html>
+"""
+        return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
     @app.get("/static/<path:path>")
     def static_files(path: str) -> object:

@@ -217,8 +217,8 @@
             </label>
           </div>
           <div class="row" style="margin-top: 0.75rem">
-            <input id="job-name" type="text" placeholder="Job name (optional)" />
-            <input id="file-input" type="file" multiple accept=".mp3" />
+            <input id="job-label" type="text" placeholder="Job label (optional)" />
+            <input id="file-input" type="file" accept=".mp3" />
           </div>
           <div class="row" style="margin-top: 0.75rem">
             <button id="submit-btn">Queue</button>
@@ -258,7 +258,7 @@
         const res = await fetch(url, options);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `Request failed (${res.status})`);
+          throw new Error(body.message || body.error || `Request failed (${res.status})`);
         }
         return res.json();
       }
@@ -317,10 +317,10 @@
           const div = document.createElement("div");
           div.className = "job";
           div.innerHTML = `
-            <h3>${job.input.job_name || job.id}</h3>
+            <h3>${job.input.job_label || job.id}</h3>
             <div class="meta">
               <span>Status: ${job.status}</span>
-              <span>${job.progress.processed}/${job.progress.total} files</span>
+              <span>${job.progress.processed}/${job.progress.total} complete</span>
               <span>${job.message}</span>
             </div>
             <div class="progress"><span style="width: ${progressPercent(job)}%"></span></div>
@@ -348,7 +348,7 @@
           : "";
         jobMonitor.innerHTML = `
           <div>
-            <strong>${job.input.job_name || job.id}</strong>
+            <strong>${job.input.job_label || job.id}</strong>
             <div class="muted">${job.message}</div>
             <div class="muted">Step: ${job.progress.step || "n/a"}</div>
             <div class="progress"><span style="width:${progress}%"></span></div>
@@ -371,17 +371,18 @@
       submitBtn.addEventListener("click", async () => {
         submitStatus.textContent = "";
         const files = fileInput.files;
-        if (!files.length) {
-          submitStatus.textContent = "Select at least one mp3.";
+        if (files.length !== 1) {
+          submitStatus.textContent = "Select exactly one mp3.";
           return;
         }
         const form = new FormData();
         form.append("mode", modeSelect.value);
         form.append("model", modelSelect.value);
-        if (document.getElementById("job-name").value) {
-          form.append("job_name", document.getElementById("job-name").value);
+        const jobLabel = document.getElementById("job-label").value;
+        if (jobLabel) {
+          form.append("job_label", jobLabel);
         }
-        Array.from(files).forEach((file) => form.append("files[]", file));
+        form.append("file", files[0]);
         submitBtn.disabled = true;
         submitStatus.textContent = "Uploading…";
         try {

@@ -51,9 +51,7 @@ class JobStore:
     def _write_job(self, path: Path, job: dict) -> None:
         atomic_write_json(path, job)
 
-    def create_job(
-        self, input_payload: dict, total_files: int, job_name: str | None
-    ) -> dict:
+    def create_job(self, input_payload: dict, job_label: str | None) -> dict:
         job_id = uuid.uuid4().hex
         now = utc_now_iso()
         job = {
@@ -64,7 +62,7 @@ class JobStore:
             "started_at": None,
             "finished_at": None,
             "progress": {
-                "total": total_files,
+                "total": 1,
                 "processed": 0,
                 "errors": 0,
                 "step": "queued",
@@ -72,8 +70,8 @@ class JobStore:
             "input": {
                 "mode": input_payload.get("mode"),
                 "model": input_payload.get("model"),
-                "job_name": job_name,
-                "files": input_payload.get("files", []),
+                "job_label": job_label,
+                "file": input_payload.get("file", {}),
             },
             "output": {
                 "ready": False,
@@ -92,10 +90,38 @@ class JobStore:
             if status and job.get("status") != status:
                 continue
             jobs.append(job)
-        jobs.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        jobs.sort(key=lambda item: (item.get("created_at") or "", item.get("id") or ""), reverse=True)
+        queued_positions = {}
+        queued = [job for job in jobs if job.get("status") == "queued"]
+        queued.sort(key=lambda item: (item.get("created_at") or "", item.get("id") or ""))
+        for idx, queued_job in enumerate(queued, start=1):
+            queued_positions[queued_job.get("id")] = idx
+        for job in jobs:
+            if job.get("status") == "queued":
+                job["queue_position"] = queued_positions.get(job.get("id"))
+            else:
+                job["queue_position"] = None
         if limit:
             return jobs[:limit]
         return jobs
+
+    def claim_next_queued(self) -> dict | None:
+        with self._lock:
+            queued = []
+            for job_path in self.jobs_root.glob("*/job.json"):
+                job = self._read_job(job_path)
+                if job.get("status") == "queued":
+                    queued.append((job_path, job))
+            if not queued:
+                return None
+            queued.sort(key=lambda item: ((item[1].get("created_at") or ""), item[1].get("id") or ""))
+            path, job = queued[0]
+            job["status"] = "running"
+            job["message"] = "Running"
+            if job.get("started_at") is None:
+                job["started_at"] = utc_now_iso()
+            self._write_job(path, job)
+            return job
 
     def get_job(self, job_id: str) -> dict | None:
         path = self._job_path(job_id)
@@ -175,7 +201,6 @@ class JobStore:
         content_type: str,
         size_bytes: int,
         signature: str,
-        manifest: dict | None = None,
     ) -> dict:
         def updater(job: dict) -> dict:
             job["output"] = {
@@ -185,8 +210,6 @@ class JobStore:
                 "size_bytes": size_bytes,
                 "signature": signature,
             }
-            if manifest:
-                job["output"]["manifest"] = manifest
             return job
 
         return self.update_job(job_id, updater)

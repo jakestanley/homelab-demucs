@@ -52,6 +52,7 @@ To uninstall:
 ## API
 
 See `INTEGRATION.md` for the full OpenAPI spec and integration notes.
+Live docs are available at `/docs`, with spec endpoint at `/openapi.json`.
 
 Control plane:
 
@@ -62,34 +63,30 @@ Control plane:
 
 Work plane:
 
-- `POST /api/jobs` (multipart/form-data, fields: `mode`, `model`, `job_name`, files: `files[]`)
+- `POST /api/jobs` (multipart/form-data, fields: `mode`, `model`, optional `job_label`, exactly one `file`)
 - `GET /api/jobs`
 - `GET /api/jobs/{id}`
 - `GET /api/jobs/{id}/output` (zip)
+- `GET /api/jobs/{id}/result` (zip alias)
 
 ### curl example
 
 ```bash
-curl -F "mode=4" -F "model=htdemucs" -F "files[]=@track.mp3" https://demucs.stanley.arpa/api/jobs
+curl -F "mode=4" -F "model=htdemucs" -F "job_label=my-run" -F "file=@track.mp3" https://demucs.stanley.arpa/api/jobs
 ```
 
 ### Output zip layout
 
 ```
-manifest.json
-{job_id}/
-  {track_name}/
-    4/
-      vocals.wav
-      drums.wav
-      bass.wav
-      other.wav
-    2/
-      vocals.wav
-      no_vocals.wav
+all/
+  vocals.wav
+  drums.wav
+  bass.wav
+  other.wav
+vocals/
+  vocals.wav
+  no_vocals.wav
 ```
-
-`manifest.json` maps each uploaded input file to its canonicalized output directory and produced stems/modes.
 
 ## Notes
 

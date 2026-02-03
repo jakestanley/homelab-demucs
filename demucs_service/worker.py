@@ -12,7 +12,6 @@ from pathlib import Path
 
 from .job_store import JobStore
 from .storage import ArtifactStore
-from .utils import canonical_output_dir_name
 
 
 logger = logging.getLogger(__name__)
@@ -62,10 +61,9 @@ class WorkerManager:
                 running = len(self._running_jobs)
             if paused or running >= self.max_concurrent_jobs:
                 continue
-            queued = self.job_store.list_jobs(status="queued", limit=1)
-            if not queued:
+            job = self.job_store.claim_next_queued()
+            if not job:
                 continue
-            job = queued[0]
             thread = threading.Thread(target=self._process_job, args=(job["id"],), daemon=True)
             with self._lock:
                 self._running_jobs[job["id"]] = thread
@@ -73,89 +71,81 @@ class WorkerManager:
 
     def _process_job(self, job_id: str) -> None:
         try:
-            self.job_store.set_status(job_id, "running", message="Running")
             self.job_store.update_progress(job_id, step="processing", message="Processing inputs")
             job = self.job_store.get_job(job_id)
             if not job:
                 return
             mode = job["input"]["mode"]
             model = job["input"]["model"]
-            files = job["input"]["files"]
+            file_entry = job["input"]["file"]
+            if not file_entry:
+                raise RuntimeError("Job is missing input file metadata.")
             output_entries = []
             had_errors = False
-            for file_entry in files:
-                stored_name = file_entry["stored_name"]
-                input_path = self.job_store.job_input_dir(job_id) / stored_name
-                file_hash = file_entry["sha256"]
-                modes = self._expand_modes(mode)
-                file_results = []
-                input_index = int(file_entry.get("input_index") or 0)
-                output_dir_name = canonical_output_dir_name(file_entry["name"])
-                try:
-                    for mode_entry in modes:
-                        signature = self.artifact_store.compute_signature(
-                            file_hash=file_hash, mode=mode_entry, model=model
-                        )
-                        cache_hit = self.artifact_store.artifact_ready(signature)
-                        if cache_hit:
-                            cached_metrics = self._artifact_metrics(signature)
-                            output_entries.append(
-                                {
-                                    "file": file_entry["name"],
-                                    "stored_name": stored_name,
-                                    "input_index": input_index,
-                                    "output_dir_name": output_dir_name,
-                                    "mode": mode_entry,
-                                    "signature": signature,
-                                    "cache_hit": True,
-                                    **cached_metrics,
-                                }
-                            )
-                            file_results.append(
-                                {
-                                    "mode": mode_entry,
-                                    "signature": signature,
-                                    "cache_hit": True,
-                                    **cached_metrics,
-                                }
-                            )
-                            continue
-                        run_metrics = self._run_demucs(
-                            job_id, input_path, mode_entry, model, signature
-                        )
+            stored_name = file_entry["stored_name"]
+            input_path = self.job_store.job_input_dir(job_id) / stored_name
+            file_hash = file_entry["sha256"]
+            modes = self._expand_modes(mode)
+            mode_results = []
+            try:
+                for mode_entry in modes:
+                    signature = self.artifact_store.compute_signature(
+                        file_hash=file_hash, mode=mode_entry, model=model
+                    )
+                    cache_hit = self.artifact_store.artifact_ready(signature)
+                    if cache_hit:
+                        cached_metrics = self._artifact_metrics(signature)
                         output_entries.append(
                             {
-                                "file": file_entry["name"],
-                                "stored_name": stored_name,
-                                "input_index": input_index,
-                                "output_dir_name": output_dir_name,
                                 "mode": mode_entry,
                                 "signature": signature,
-                                "cache_hit": False,
-                                **run_metrics,
+                                "cache_hit": True,
+                                **cached_metrics,
                             }
                         )
-                        file_results.append(
+                        mode_results.append(
                             {
                                 "mode": mode_entry,
                                 "signature": signature,
-                                "cache_hit": False,
-                                **run_metrics,
+                                "cache_hit": True,
+                                **cached_metrics,
                             }
                         )
-                    self.job_store.update_progress(
-                        job_id, processed_inc=1, message=f"Processed {file_entry['name']}"
+                        continue
+                    run_metrics = self._run_demucs(job_id, input_path, mode_entry, model, signature)
+                    output_entries.append(
+                        {
+                            "mode": mode_entry,
+                            "signature": signature,
+                            "cache_hit": False,
+                            **run_metrics,
+                        }
                     )
-                except Exception as exc:
-                    had_errors = True
-                    file_results.append({"error": str(exc)})
-                    self.job_store.update_progress(
-                        job_id, errors_inc=1, message=f"Failed {file_entry['name']}"
+                    mode_results.append(
+                        {
+                            "mode": mode_entry,
+                            "signature": signature,
+                            "cache_hit": False,
+                            **run_metrics,
+                        }
                     )
-                finally:
-                    self._record_file_results(job_id, stored_name, file_results)
+                self.job_store.update_progress(
+                    job_id,
+                    processed_inc=1,
+                    message=f"Processed {file_entry.get('original_filename') or stored_name}",
+                )
+            except Exception as exc:
+                had_errors = True
+                mode_results.append({"error": str(exc)})
+                self.job_store.update_progress(
+                    job_id,
+                    errors_inc=1,
+                    message=f"Failed {file_entry.get('original_filename') or stored_name}",
+                )
+            finally:
+                self._record_mode_results(job_id, mode_results)
 
-            zip_path, manifest = self._build_output_zip(job_id, output_entries)
+            zip_path = self._build_output_zip(job_id, output_entries)
             size_bytes = zip_path.stat().st_size
             job_signature = self._job_signature(output_entries)
             self.job_store.set_output(
@@ -164,7 +154,6 @@ class WorkerManager:
                 content_type="application/zip",
                 size_bytes=size_bytes,
                 signature=job_signature,
-                manifest=manifest,
             )
             if had_errors:
                 self.job_store.set_status(job_id, "failed", message="Completed with errors")
@@ -176,11 +165,11 @@ class WorkerManager:
             with self._lock:
                 self._running_jobs.pop(job_id, None)
 
-    def _record_file_results(self, job_id: str, stored_name: str, results: list[dict]) -> None:
+    def _record_mode_results(self, job_id: str, results: list[dict]) -> None:
         def updater(job: dict) -> dict:
-            for entry in job.get("input", {}).get("files", []):
-                if entry.get("stored_name") == stored_name:
-                    entry["results"] = results
+            file_entry = job.get("input", {}).get("file", {})
+            if isinstance(file_entry, dict):
+                file_entry["results"] = results
             return job
 
         self.job_store.update_job(job_id, updater)
@@ -252,14 +241,12 @@ class WorkerManager:
             return {"rate_seconds_per_second": float(rate)}
         return {}
 
-    def _build_output_zip(self, job_id: str, output_entries: list[dict]) -> tuple[Path, dict]:
+    def _build_output_zip(self, job_id: str, output_entries: list[dict]) -> Path:
         import zipfile
 
         job = self.job_store.get_job(job_id)
         if not job:
             raise RuntimeError("Job missing for output packaging.")
-
-        manifest = self._build_manifest(job_id, output_entries)
 
         output_zip_path = self.job_store.job_output_zip_path(job_id)
         output_zip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,84 +257,20 @@ class WorkerManager:
         with zipfile.ZipFile(temp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
             for entry in output_entries:
                 signature = entry["signature"]
-                file_name = entry["output_dir_name"]
                 mode = entry["mode"]
+                mode_folder = "all" if mode == "4" else "vocals"
                 artifact_dir = self.artifact_store.artifact_dir(signature)
                 stems_dir = artifact_dir / "stems"
                 for stem_path in sorted(stems_dir.glob("*.wav"), key=lambda item: item.name):
-                    archive_name = f"{job_id}/{file_name}/{mode}/{stem_path.name}"
+                    archive_name = f"{mode_folder}/{stem_path.name}"
                     zip_handle.write(stem_path, archive_name)
-            zip_handle.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
         os.replace(temp_zip, output_zip_path)
-        return output_zip_path, manifest
+        return output_zip_path
 
     def _job_signature(self, output_entries: list[dict]) -> str:
         import hashlib
 
         digest = hashlib.sha256()
-        for entry in sorted(
-            output_entries,
-            key=lambda item: (
-                item.get("stored_name", item["file"]),
-                item["mode"],
-                item["signature"],
-            ),
-        ):
-            digest.update(f"{entry['file']}:{entry['mode']}:{entry['signature']}".encode("utf-8"))
+        for entry in sorted(output_entries, key=lambda item: (item["mode"], item["signature"])):
+            digest.update(f"{entry['mode']}:{entry['signature']}".encode("utf-8"))
         return digest.hexdigest()
-
-    def _build_manifest(self, job_id: str, output_entries: list[dict]) -> dict:
-        files: dict[str, dict] = {}
-        for entry in output_entries:
-            stored_name = entry.get("stored_name", entry["file"])
-            file_doc = files.setdefault(
-                stored_name,
-                {
-                    "input_index": entry.get("input_index"),
-                    "input_stored_name": stored_name,
-                    "input_original_name": entry["file"],
-                    "output_dir_name": entry["output_dir_name"],
-                    "output_dir_path": f"{job_id}/{entry['output_dir_name']}",
-                    "modes": [],
-                },
-            )
-            mode_doc = {
-                "mode": entry["mode"],
-                "signature": entry["signature"],
-                "cache_hit": bool(entry.get("cache_hit")),
-                "stems": self._artifact_stems(entry["signature"]),
-            }
-            rate = entry.get("rate_seconds_per_second")
-            if isinstance(rate, (int, float)):
-                mode_doc["rate_seconds_per_second"] = float(rate)
-            file_doc["modes"].append(mode_doc)
-
-        sorted_files = sorted(
-            files.values(),
-            key=lambda item: (
-                int(item.get("input_index") or 0),
-                item.get("input_stored_name") or "",
-            ),
-        )
-        for file_doc in sorted_files:
-            file_doc["modes"].sort(key=lambda item: item["mode"])
-
-        return {
-            "version": "v1",
-            "job_id": job_id,
-            "files": sorted_files,
-        }
-
-    def _artifact_stems(self, signature: str) -> list[str]:
-        meta_path = self.artifact_store.artifact_dir(signature) / "meta.json"
-        if not meta_path.exists():
-            return []
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-        stems = meta.get("stems")
-        if isinstance(stems, list):
-            valid = [name for name in stems if isinstance(name, str)]
-            return sorted(valid)
-        return []
