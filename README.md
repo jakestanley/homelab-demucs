@@ -1,44 +1,105 @@
 # homelab-demucs
 
-Windows-first HTTP service that accepts MP3 separation jobs and runs the Demucs CLI on the same machine.
+Host-run HTTP service that accepts MP3 separation jobs and runs the Demucs CLI on the same machine.
 
-## Runtime
+## Runtime Model
 
-- Windows service via NSSM (preferred)
-- Runs on the host without Docker
-- Ingress, DNS, and ports are defined in `homelab-infra/registry.yaml` (service: `demucs`)
+- Windows host service via NSSM
+- Linux host service via systemd
+- Runs directly on the host without Docker
+- Ingress, DNS, ports, and exposure are managed in `homelab-infra` for service `demucs`; do not add local repo-specific ingress wiring here
 
-## Requirements
+The canonical host entrypoints are:
 
+- Windows: `scripts/up.ps1`
+- Linux: `scripts/up.sh`
+- Stable Python process entrypoint: `python -m demucs_service.server`
+
+## Required Dependencies
+
+- `systemd` for Linux service supervision and journald logging
+- Python 3.10+ with the packages in `requirements.txt`
+- PyTorch installed with CUDA support
 - CUDA-capable NVIDIA GPU and drivers
-- PyTorch installed with CUDA support (`torch.cuda.is_available()` must be true)
-- Demucs installed and runnable (`demucs` on PATH unless overridden)
-- Python 3.10+ recommended
+- Demucs installed and runnable via `DEMUCS_BIN`
 
-## Environment
+Recommended verification commands:
 
-Copy `.env.example` to `.env` and adjust if needed:
+```bash
+systemctl --version && systemd-analyze --version
+test -x /absolute/path/to/python3
+command -v demucs
+/absolute/path/to/python3 -c "import torch; print(torch.cuda.is_available())"
+```
 
-- `HOST` (default `0.0.0.0`)
-- `PORT` (default `20033`)
-- `STORAGE_ROOT` (default `D:\demucs`)
-- `MAX_CONCURRENT_JOBS` (default `1`)
+Startup fails fast if `torch` cannot be imported, if `torch.cuda.is_available()` is false, if `DEMUCS_DEVICE` is not `cuda`, or if the Demucs CLI cannot be resolved.
+
+## Configuration
+
+Application env:
+
+- `.env.example` documents the app env vars used for manual runs
+- `systemd/demucs.env.example` is the host template for `/etc/demucs/demucs.env`
+
+Relevant variables:
+
+- `HOST`: bind address, default `0.0.0.0`
+- `PORT`: bind port; keep this aligned with `homelab-infra`
+- `STORAGE_ROOT`: writable root for job inputs, artifacts, and output zips; all Demucs I/O lives under this path and it must be host-configurable
+- `MAX_CONCURRENT_JOBS`: max active Demucs jobs
 - `DEMUCS_DEFAULT_MODEL`
-- `DEMUCS_MODELS` (comma-separated list)
-- `DEMUCS_BIN` (path or command for demucs CLI)
-- `DEMUCS_DEVICE` (must be `cuda`; service fails startup otherwise)
-- `JOB_TIMEOUT_SECONDS` (default `180`; job fails if it exceeds this runtime)
-- `OUTPUT_FORMAT_VERSION` (artifact signature salt)
+- `DEMUCS_MODELS`: comma-separated allowed models
+- `DEMUCS_BIN`: Demucs executable path or command name
+- `DEMUCS_DEVICE`: must stay `cuda`
+- `JOB_TIMEOUT_SECONDS`
+- `OUTPUT_FORMAT_VERSION`: artifact signature salt
+- `DEMUCS_PYTHON_EXE`: optional interpreter override for `scripts/up.sh` and `scripts/up.ps1`
 
-## Run manually
+## Manual Run
+
+Windows:
 
 ```powershell
 .\scripts\up.ps1
 ```
 
-If Python is not on PATH, pass `-PythonExe` or set `DEMUCS_PYTHON_EXE`.
+Linux:
 
-## Install as a Windows service (NSSM)
+```bash
+./scripts/up.sh
+```
+
+If the Python interpreter is not discoverable, set `DEMUCS_PYTHON_EXE` to an absolute path.
+
+## Install As A Linux systemd Service
+
+The provided unit template assumes the repo is installed at `/srv/demucs`.
+
+1. Copy the repo to `/srv/demucs`.
+2. Copy `systemd/demucs.env.example` to `/etc/demucs/demucs.env` and fill in host-specific values.
+3. Copy `systemd/demucs.service` to `/etc/systemd/system/demucs.service`.
+4. Create the dedicated runtime account if it does not exist:
+
+```bash
+sudo groupadd --system demucs
+sudo useradd --system --gid demucs --home-dir /var/lib/demucs --create-home --shell /usr/sbin/nologin demucs
+sudo install -d -o demucs -g demucs /var/lib/demucs
+```
+
+5. Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now demucs.service
+```
+
+Logs go to journald:
+
+```bash
+journalctl -u demucs.service -f
+```
+
+## Install As A Windows Service (NSSM)
 
 ```powershell
 .\scripts\install-service.ps1 -Start

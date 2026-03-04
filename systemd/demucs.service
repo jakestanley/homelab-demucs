@@ -1,0 +1,20 @@
+[Unit]
+Description=Demucs separation API service
+
+[Service]
+Type=simple
+User=demucs
+Group=demucs
+WorkingDirectory=/srv/demucs
+EnvironmentFile=/etc/demucs/demucs.env
+ExecStart=/srv/demucs/scripts/up.sh
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
