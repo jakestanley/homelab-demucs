@@ -6,8 +6,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install torch with CUDA before requirements so pip doesn't pull the CPU build
-RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124
+# Install torch and torchaudio with CUDA before requirements so pip doesn't pull wrong builds
+RUN pip3 install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
