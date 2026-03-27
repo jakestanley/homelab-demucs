@@ -1,0 +1,11 @@
+services:
+  demucs:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${PORT:-20033}:${PORT:-20033}"
+    volumes:
+      - ${STORAGE_ROOT:-/mnt/data/demucs}:/data
+    devices:
+      - "nvidia.com/gpu=all"
