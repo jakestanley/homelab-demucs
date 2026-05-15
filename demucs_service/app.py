@@ -285,10 +285,9 @@ def _storage_volume_status(storage_root: Path) -> dict:
         resolved_root = storage_root.resolve()
     except OSError:
         pass
-    volume_root = Path(resolved_root.anchor) if resolved_root.anchor else resolved_root
-    usage = shutil.disk_usage(volume_root)
+    usage = shutil.disk_usage(resolved_root)
     return {
-        "path": str(volume_root),
+        "path": str(resolved_root),
         "total_bytes": usage.total,
         "used_bytes": usage.used,
         "free_bytes": usage.free,
