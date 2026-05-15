@@ -32,7 +32,7 @@ def load_settings() -> Settings:
     base_dir = Path(__file__).resolve().parent.parent
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "20033"))
-    storage_root = Path(os.getenv("STORAGE_ROOT", r"D:\demucs"))
+    storage_root = Path(os.getenv("STORAGE_ROOT", "/data"))
     if not storage_root.is_absolute():
         storage_root = (base_dir / storage_root).resolve()
     max_concurrent_jobs = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))
