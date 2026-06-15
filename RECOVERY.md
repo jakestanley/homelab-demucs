@@ -29,13 +29,13 @@ journalctl --version
 1. Restore the repo contents to the host path used by the runtime.
    Linux unit template expects `/srv/demucs`.
 2. Restore the host env/config.
-   Linux: `/etc/demucs/demucs.env` from `systemd/demucs.env.example`.
+   Linux: `/etc/demucs/demucs.env` from `.env.example`.
    Manual app env: repo-local `.env` from `.env.example` when used.
 3. Restore writable state under `STORAGE_ROOT`.
    This path contains job inputs, cached artifacts, and output zips for Demucs work.
 4. Restore the service definition.
    Linux: `/etc/systemd/system/demucs.service` from `systemd/demucs.service`.
-   Windows: reinstall/update via `scripts/install-service.ps1`.
+   Windows: reinstall/update via `scripts/up.ps1` (idempotent).
 5. Ensure the runtime account owns the writable storage path.
    Linux example: `chown -R demucs:demucs /var/lib/demucs`.
 6. Start and re-enable the service.
@@ -52,7 +52,7 @@ journalctl -u demucs.service -n 100
 Windows:
 
 ```powershell
-.\scripts\install-service.ps1 -Start
+.\scripts\up.ps1
 ```
 
 ## Avoid

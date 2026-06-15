@@ -1,145 +1,137 @@
 param(
-    [string]$PythonExe
+    [switch]$Restart
 )
 
 $ErrorActionPreference = "Stop"
-$RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+
+# --- per-repo config ---
+$DefaultServiceName = "homelab-demucs"
+$DefaultDisplayName = "homelab-demucs separation API"
+$DefaultDescription = "Host-run Demucs separation HTTP service"
+$PythonExeEnvKey    = "DEMUCS_PYTHON_EXE"
+$PortEnvKey         = "PORT"
+$DefaultPort        = "20033"
+$AppParameters      = "-m demucs_service.server"
+# -----------------------
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
-function Get-EnvValue {
-    param(
-        [string]$Path,
-        [string]$Key,
-        [string]$DefaultValue
-    )
-    if (!(Test-Path $Path)) {
-        return $DefaultValue
-    }
-    $lines = Get-Content $Path
-    foreach ($line in $lines) {
-        if ($line.Trim().StartsWith("#") -or !$line.Contains("=")) {
-            continue
-        }
-        $pair = $line.Split("=", 2)
-        if ($pair[0].Trim() -eq $Key) {
-            return $pair[1].Trim()
-        }
-    }
-    return $DefaultValue
+function Get-DotEnvLines {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return @() }
+    return @(Get-Content $Path | Where-Object {
+        $_ -and ($_ -notmatch '^\s*#') -and ($_ -match '=')
+    })
 }
 
-function Test-PreflightRepo {
-    param([string]$Path, [string]$Name)
-    $localWarnings = @()
-    if (!(Test-Path $Path)) {
-        $localWarnings += "$Name not found at $Path"
-        return $localWarnings
-    }
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        $localWarnings += "git not available; cannot verify $Name state."
-        return $localWarnings
-    }
-    $isGit = git -C $Path rev-parse --is-inside-work-tree 2>$null
-    if ($isGit -ne "true") {
-        $localWarnings += "$Name is not a git repository."
-        return $localWarnings
-    }
-    $dirty = git -C $Path status --porcelain
-    if ($dirty) {
-        $localWarnings += "$Name has uncommitted changes."
-    }
-    $originHead = git -C $Path symbolic-ref refs/remotes/origin/HEAD 2>$null
-    if ($originHead) {
-        $defaultBranch = $originHead.Split("/")[-1]
-        $currentBranch = git -C $Path rev-parse --abbrev-ref HEAD
-        if ($currentBranch -ne $defaultBranch) {
-            $localWarnings += "$Name is on $currentBranch, expected $defaultBranch."
-        }
-        $defaultHead = git -C $Path rev-parse "origin/$defaultBranch" 2>$null
-        $currentHead = git -C $Path rev-parse HEAD 2>$null
-        if ($defaultHead -and $currentHead -and ($defaultHead -ne $currentHead)) {
-            $localWarnings += "$Name is not at origin/$defaultBranch HEAD."
-        }
-    } else {
-        $localWarnings += "$Name has no origin/HEAD to verify default branch."
-    }
-    return $localWarnings
-}
-
-function Confirm-Preflight {
-    $answer = Read-Host "Preflight checks raised warnings. Continue? (y/N)"
-    if ($answer.ToLower() -ne "y") {
-        Write-Host "Aborting startup."
-        exit 1
-    }
-}
-
-$warnings = @()
-$infraPath = Join-Path $RepoRoot "..\homelab-infra"
-$standardsPath = Join-Path $RepoRoot "..\homelab-standards"
-$warnings += Test-PreflightRepo -Path $infraPath -Name "homelab-infra"
-$warnings += Test-PreflightRepo -Path $standardsPath -Name "homelab-standards"
-
-if ($warnings.Count -gt 0) {
-    foreach ($w in $warnings) {
-        if ($w) {
-            Write-Warning $w
+function Get-DotEnvValue {
+    param([string]$Path, [string]$Key, [string]$Default)
+    foreach ($line in (Get-DotEnvLines $Path)) {
+        $parts = $line -split '=', 2
+        if ($parts.Count -eq 2 -and $parts[0].Trim() -eq $Key) {
+            return $parts[1].Trim()
         }
     }
-    Confirm-Preflight
+    return $Default
 }
 
-$port = Get-EnvValue -Path "$RepoRoot\.env" -Key "PORT" -DefaultValue "20033"
-$demucsBin = Get-EnvValue -Path "$RepoRoot\.env" -Key "DEMUCS_BIN" -DefaultValue ""
-if (-not $demucsBin -and -not $env:DEMUCS_BIN) {
-    $demucsCmd = Get-Command demucs.exe -ErrorAction SilentlyContinue
-    if ($demucsCmd -and $demucsCmd.Source) {
-        $env:DEMUCS_BIN = $demucsCmd.Source
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return ([Security.Principal.WindowsPrincipal]::new($id)).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Ensure-FirewallRule {
+    param([string]$Port, [string]$RuleName)
+    if (-not $Port) { return }
+    if (-not (Test-IsAdmin)) {
+        Write-Warning "Not elevated; firewall rule for TCP $Port may be missing."
+        Write-Host "Run elevated: New-NetFirewallRule -DisplayName `"$RuleName`" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Private"
+        return
     }
-}
-$ruleName = "homelab-demucs-$port"
-$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-
-if ($isAdmin) {
-    $existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+    $existing = Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue
     if (-not $existing) {
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -Profile Private | Out-Null
-        Write-Host "Created firewall rule $ruleName."
+        New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -Action Allow `
+            -Protocol TCP -LocalPort $Port -Profile Private | Out-Null
+    }
+}
+
+function Resolve-BootstrapPython {
+    param([string]$EnvFile, [string]$EnvKey)
+    $candidate = Get-DotEnvValue $EnvFile $EnvKey $null
+    if (-not $candidate -and $EnvKey) { $candidate = (Get-Item "Env:$EnvKey" -ErrorAction SilentlyContinue).Value }
+    if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    $cmd = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($py) { return $py.Source }
+    throw "Python interpreter not found. Set $EnvKey in .env to a full path."
+}
+
+# --- main ---
+$envFile = Join-Path $RepoRoot ".env"
+if (-not (Test-Path $envFile)) {
+    Write-Warning "Missing .env; copy .env.example to .env and edit before running."
+}
+
+$serviceName = Get-DotEnvValue $envFile "NSSM_SERVICE_NAME" $DefaultServiceName
+$displayName = Get-DotEnvValue $envFile "NSSM_DISPLAY_NAME" $DefaultDisplayName
+$description = Get-DotEnvValue $envFile "NSSM_DESCRIPTION" $DefaultDescription
+
+if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
+    throw "nssm not found in PATH. Install NSSM and retry."
+}
+
+$venvPath   = Join-Path $RepoRoot ".venv"
+$venvPython = Join-Path $venvPath "Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
+    $bootstrap = Resolve-BootstrapPython -EnvFile $envFile -EnvKey $PythonExeEnvKey
+    Write-Host "Creating venv with $bootstrap"
+    if ($bootstrap -match 'py(\.exe)?$') {
+        & $bootstrap -3 -m venv $venvPath
+    } else {
+        & $bootstrap -m venv $venvPath
+    }
+    if (-not (Test-Path $venvPython)) { throw "venv creation failed at $venvPath" }
+}
+
+& $venvPython -m pip install --upgrade pip
+& $venvPython -m pip install -r (Join-Path $RepoRoot "requirements.txt")
+
+$port = Get-DotEnvValue $envFile $PortEnvKey $DefaultPort
+Ensure-FirewallRule -Port $port -RuleName "$serviceName ($port)"
+
+$logsDir = Join-Path $RepoRoot "logs"
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+
+$svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $svc) {
+    & nssm install $serviceName $venvPython $AppParameters | Out-Null
+}
+
+& nssm set $serviceName Application $venvPython | Out-Null
+& nssm set $serviceName AppParameters $AppParameters | Out-Null
+& nssm set $serviceName AppDirectory $RepoRoot | Out-Null
+& nssm set $serviceName DisplayName $displayName | Out-Null
+& nssm set $serviceName Description $description | Out-Null
+& nssm set $serviceName AppStdout (Join-Path $logsDir "$serviceName-stdout.log") | Out-Null
+& nssm set $serviceName AppStderr (Join-Path $logsDir "$serviceName-stderr.log") | Out-Null
+
+$appEnvLines = @(Get-DotEnvLines $envFile | Where-Object { $_ -notmatch '^\s*NSSM_' })
+if ($appEnvLines.Count -gt 0) {
+    & nssm set $serviceName AppEnvironmentExtra $appEnvLines | Out-Null
+} else {
+    & nssm reset $serviceName AppEnvironmentExtra 2>$null | Out-Null
+}
+
+$status = (& nssm status $serviceName).Trim()
+if ($status -eq "SERVICE_RUNNING") {
+    if ($Restart) {
+        & nssm restart $serviceName | Out-Null
     }
 } else {
-    $command = "New-NetFirewallRule -DisplayName `"$ruleName`" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -Profile Private"
-    Write-Warning "Not running elevated; firewall rule may be missing."
-    Write-Host "Run elevated PowerShell:"
-    Write-Host $command
+    & nssm start $serviceName | Out-Null
 }
 
-$pythonCommand = $null
-$pythonArgs = @()
-if (-not $PythonExe) {
-    if ($env:DEMUCS_PYTHON_EXE) {
-        $PythonExe = $env:DEMUCS_PYTHON_EXE
-    } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-        $PythonExe = "py"
-        $pythonArgs = @("-3")
-    } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-        $PythonExe = "python"
-    } else {
-        throw "Python interpreter not found. Provide -PythonExe."
-    }
-}
-if ($PythonExe -and -not $pythonCommand) {
-    $pythonCommand = $PythonExe
-}
-
-if (!(Test-Path "$RepoRoot\.venv")) {
-    Write-Host "Creating virtual environment..."
-    & $pythonCommand @pythonArgs -m venv "$RepoRoot\.venv"
-}
-
-$VenvPython = "$RepoRoot\.venv\Scripts\python.exe"
-& $VenvPython -m pip install --upgrade pip
-& $VenvPython -m pip install -r "$RepoRoot\requirements.txt"
-
-Write-Host "Starting Demucs service..."
-& $VenvPython -m demucs_service.server
+Write-Host "Service '$serviceName' applied. Status: $((& nssm status $serviceName).Trim())"

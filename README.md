@@ -36,10 +36,12 @@ Startup fails fast if `torch` cannot be imported, if `torch.cuda.is_available()`
 
 ## Configuration
 
-Application env:
+`.env.example` is the canonical template for all deployment modes:
 
-- `.env.example` documents the app env vars used for manual runs
-- `systemd/demucs.env.example` is the host template for `/etc/demucs/demucs.env`
+- Docker Compose: `.env` next to `docker-compose.yml` (via `env_file`)
+- Linux `systemd`: copy `.env.example` to `/etc/demucs/demucs.env`
+- Windows NSSM: `.env` in the repo root; `scripts/up.ps1` pushes all non-
+  `NSSM_*` keys to the service via `AppEnvironmentExtra`
 
 Relevant variables:
 
@@ -55,15 +57,7 @@ Relevant variables:
 - `OUTPUT_FORMAT_VERSION`: artifact signature salt
 - `DEMUCS_PYTHON_EXE`: optional interpreter override for `scripts/up.sh` and `scripts/up.ps1`
 
-## Manual Run
-
-Windows:
-
-```powershell
-.\scripts\up.ps1
-```
-
-Linux:
+## Manual Run (Linux)
 
 ```bash
 ./scripts/up.sh
@@ -76,7 +70,7 @@ If the Python interpreter is not discoverable, set `DEMUCS_PYTHON_EXE` to an abs
 The provided unit template assumes the repo is installed at `/srv/demucs`.
 
 1. Copy the repo to `/srv/demucs`.
-2. Copy `systemd/demucs.env.example` to `/etc/demucs/demucs.env` and fill in host-specific values.
+2. Copy `.env.example` to `/etc/demucs/demucs.env` and fill in host-specific values.
 3. Copy `systemd/demucs.service` to `/etc/systemd/system/demucs.service`.
 4. Create the dedicated runtime account if it does not exist:
 
@@ -101,14 +95,25 @@ journalctl -u demucs.service -f
 
 ## Install As A Windows Service (NSSM)
 
+`scripts/up.ps1` is the single entrypoint for service creation, updating, and
+starting. It is idempotent: re-run it to apply config changes.
+
+Install / update / start (elevated PowerShell):
+
 ```powershell
-.\scripts\install-service.ps1 -Start
+.\scripts\up.ps1
 ```
 
-To uninstall:
+Force restart if already running:
 
 ```powershell
-.\scripts\install-service.ps1 -Stop -Uninstall
+.\scripts\up.ps1 -Restart
+```
+
+Uninstall:
+
+```powershell
+.\scripts\uninstall.ps1
 ```
 
 ## API
@@ -150,6 +155,6 @@ vocals/
 ## Notes
 
 - Job metadata and artifacts are stored under `STORAGE_ROOT` and survive restarts.
-- `scripts/up.ps1` creates the Windows Firewall rule for the configured port when run elevated.
+- `scripts/up.ps1` creates the Windows Firewall rule for the configured `PORT` when run elevated.
 - The service uses the host Demucs CLI; set `DEMUCS_BIN` to a full path if it is not on PATH.
 - Startup fails fast if PyTorch CUDA is unavailable.
