@@ -100,6 +100,7 @@ if (-not (Test-Path $venvPython)) {
 & $venvPython -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 & $venvPython -m pip install -r (Join-Path $RepoRoot "requirements.txt")
 & $venvPython -m pip install demucs
+& $venvPython -m pip install soundfile
 
 $port = Get-DotEnvValue $envFile $PortEnvKey $DefaultPort
 Ensure-FirewallRule -Port $port -RuleName "$serviceName ($port)"
