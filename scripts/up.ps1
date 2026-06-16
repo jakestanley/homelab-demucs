@@ -121,6 +121,13 @@ if (-not $svc) {
 & nssm set $serviceName AppStderr (Join-Path $logsDir "$serviceName-stderr.log") | Out-Null
 
 $appEnvLines = @(Get-DotEnvLines $envFile | Where-Object { $_ -notmatch '^\s*NSSM_' })
+
+$venvDemucs = Join-Path (Split-Path $venvPython -Parent) "demucs.exe"
+if (Test-Path $venvDemucs) {
+    $appEnvLines = @($appEnvLines | Where-Object { $_ -notmatch '^\s*DEMUCS_BIN\s*=' })
+    $appEnvLines += "DEMUCS_BIN=$venvDemucs"
+}
+
 if ($appEnvLines.Count -gt 0) {
     & nssm set $serviceName AppEnvironmentExtra $appEnvLines | Out-Null
 } else {
